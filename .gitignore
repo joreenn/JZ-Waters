@@ -11,3 +11,18 @@ build/
 Thumbs.db
 Thumbs.db:encryptable
 desktop.ini
+
+# Laravel backend
+backend/vendor/
+backend/.env
+backend/storage/*.key
+backend/storage/logs/
+backend/storage/framework/cache/data/
+backend/storage/framework/sessions/
+backend/storage/framework/views/
+backend/bootstrap/cache/
+backend/.phpunit.result.cache
+
+# Vite
+client-vite/dist/
+client-vite/.env

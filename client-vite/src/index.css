@@ -1,0 +1,80 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Global font defaults ── */
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: 'Nunito', sans-serif;
+  color: #0D2137;
+  background: #f8fafc;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Baloo 2', cursive;
+}
+
+/* ── Bubble animation keyframes ── */
+@keyframes floatUp {
+  0% {
+    transform: translateY(100vh) scale(0);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.4;
+  }
+  90% {
+    opacity: 0.1;
+  }
+  100% {
+    transform: translateY(-20vh) scale(1);
+    opacity: 0;
+  }
+}
+
+.bubble {
+  position: absolute;
+  bottom: -50px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  animation: floatUp linear infinite;
+  pointer-events: none;
+}
+
+.bubble:nth-child(1) { left: 5%;  width: 20px; height: 20px; animation-duration: 8s;  animation-delay: 0s;   }
+.bubble:nth-child(2) { left: 15%; width: 35px; height: 35px; animation-duration: 10s; animation-delay: 1s;   }
+.bubble:nth-child(3) { left: 30%; width: 15px; height: 15px; animation-duration: 7s;  animation-delay: 2s;   }
+.bubble:nth-child(4) { left: 45%; width: 25px; height: 25px; animation-duration: 9s;  animation-delay: 0.5s; }
+.bubble:nth-child(5) { left: 60%; width: 40px; height: 40px; animation-duration: 11s; animation-delay: 3s;   }
+.bubble:nth-child(6) { left: 75%; width: 18px; height: 18px; animation-duration: 8s;  animation-delay: 1.5s; }
+.bubble:nth-child(7) { left: 85%; width: 30px; height: 30px; animation-duration: 9s;  animation-delay: 2.5s; }
+.bubble:nth-child(8) { left: 50%; width: 22px; height: 22px; animation-duration: 12s; animation-delay: 4s;   }
+
+/* ── Blob background for hero ── */
+.blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+/* ── Scrollbar styling ── */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #E1F5FE;
+}
+::-webkit-scrollbar-thumb {
+  background: #29B6F6;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #1565C0;
+}
