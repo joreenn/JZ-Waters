@@ -28,6 +28,8 @@ export default function Checkout() {
   });
   const [deliveryFee, setDeliveryFee] = useState(0);
 
+  const gallonsCount = items.reduce((sum, item) => sum + (parseInt(item.quantity, 10) || 0), 0);
+
   useEffect(() => {
     if (!user) { router.push('/login'); return; }
     if (items.length === 0) { router.push('/cart'); return; }
@@ -47,11 +49,12 @@ export default function Checkout() {
 
   useEffect(() => {
     const zone = zones.find(z => z.id == form.zone_id);
-    setDeliveryFee(zone ? parseFloat(zone.delivery_fee) : 0);
+    const ratePerGallon = zone ? Number(zone.delivery_fee) : 0;
+    setDeliveryFee(ratePerGallon * gallonsCount);
   }, [form.zone_id, zones]);
 
-  const discount = Math.min(parseFloat(form.redeem_points) || 0, loyalty.balance) * (loyalty.peso_per_point || 0.1);
-  const total = subtotal + deliveryFee - discount;
+  const discount = Math.min(parseFloat(form.redeem_points) || 0, Number(loyalty.balance) || 0) * (Number(loyalty.peso_per_point) || 0.1);
+  const total = (Number(subtotal) || 0) + (Number(deliveryFee) || 0) - (Number(discount) || 0);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -61,11 +64,12 @@ export default function Checkout() {
     setPlacing(true);
     try {
       const orderData = {
-        items: items.map(i => ({ product_id: i.id, quantity: i.quantity })),
-        delivery_address: form.delivery_address,
+        items: items.map(i => ({ product_id: i.product_id || i.id, quantity: i.quantity })),
+        address: form.delivery_address,
+        contact_phone: user?.phone || 'N/A',
         zone_id: parseInt(form.zone_id),
         payment_method: form.payment_method,
-        redeem_points: parseInt(form.redeem_points) || 0,
+        points_to_redeem: parseInt(form.redeem_points) || 0,
         notes: form.notes
       };
       const res = await api.post('/orders', orderData);
@@ -102,7 +106,7 @@ export default function Checkout() {
                       <select value={form.zone_id} onChange={e => setForm({ ...form, zone_id: e.target.value })} className="input-field" required>
                         <option value="">Select zone...</option>
                         {zones.map(z => (
-                          <option key={z.id} value={z.id}>{z.name} — {formatCurrency(z.delivery_fee)} fee</option>
+                          <option key={z.id} value={z.id}>{z.name} — {formatCurrency(z.delivery_fee)} per gallon</option>
                         ))}
                       </select>
                     </div>
@@ -128,10 +132,9 @@ export default function Checkout() {
                   </h3>
                   <div className="grid grid-cols-2 gap-3">
                     {[
-                      { value: 'cash', label: 'Cash on Delivery' },
+                      { value: 'cod', label: 'Cash on Delivery' },
                       { value: 'gcash', label: 'GCash' },
-                      { value: 'bank_transfer', label: 'Bank Transfer' },
-                      { value: 'maya', label: 'Maya' },
+                      { value: 'online', label: 'Online Payment' },
                     ].map(pm => (
                       <label key={pm.value}
                         className={`p-3 border rounded-lg cursor-pointer flex items-center gap-3 transition-colors ${form.payment_method === pm.value ? 'border-primary-600 bg-primary-50' : 'border-gray-200 hover:border-gray-300'}`}>
@@ -187,7 +190,7 @@ export default function Checkout() {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-500">Delivery Fee</span>
-                      <span>{deliveryFee > 0 ? formatCurrency(deliveryFee) : 'Select zone'}</span>
+                      <span>{form.zone_id ? `${formatCurrency(deliveryFee)} (${gallonsCount} gallon${gallonsCount !== 1 ? 's' : ''})` : 'Select zone'}</span>
                     </div>
                     {discount > 0 && (
                       <div className="flex justify-between text-green-600">

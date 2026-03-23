@@ -31,7 +31,7 @@ export default function RefillerDashboard() {
         api.get('/refills/summary').catch(() => ({ data: { summary: {} } }))
       ]);
       setRefills(rRes.data.refills || []);
-      setProducts(pRes.data.products || []);
+      setProducts(Array.isArray(pRes.data) ? pRes.data : (pRes.data.products || []));
       setSummary(sRes.data.summary);
     } catch { toast.error('Failed to load data'); }
     finally { setLoading(false); }

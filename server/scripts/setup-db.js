@@ -67,7 +67,7 @@ async function setupDatabase() {
       id INT AUTO_INCREMENT PRIMARY KEY,
       name VARCHAR(255) NOT NULL,
       description TEXT,
-      category ENUM('water_gallon', 'water_bottle', 'container', 'accessory', 'other') NOT NULL DEFAULT 'water_gallon',
+      category ENUM('Water Products', 'Containers', 'Accessories') NOT NULL,
       price DECIMAL(10,2) NOT NULL,
       stock_quantity INT NOT NULL DEFAULT 0,
       unit VARCHAR(50) DEFAULT 'gallon',
@@ -231,6 +231,22 @@ async function setupDatabase() {
   `;
 
   await connection.query(schema);
+
+  // Ensure products table category matches the new standardized categories.
+  // Convert old category values before enforcing the new enum to avoid truncation errors.
+  await connection.query('ALTER TABLE products MODIFY COLUMN category VARCHAR(50) NOT NULL');
+  await connection.query(`
+    UPDATE products
+    SET category = CASE
+      WHEN category IN ('water_gallon', 'water_bottle', 'Water Products') THEN 'Water Products'
+      WHEN category IN ('container', 'Containers') THEN 'Containers'
+      ELSE 'Accessories'
+    END
+  `);
+  await connection.query(
+    `ALTER TABLE products MODIFY COLUMN category ENUM('Water Products', 'Containers', 'Accessories') NOT NULL`
+  );
+
   console.log('✅ All tables created successfully');
 
   // Insert default settings

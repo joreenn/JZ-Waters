@@ -7,6 +7,28 @@ import { connectSocket, disconnectSocket } from '../lib/socket';
 
 const AuthContext = createContext(null);
 
+const TOKEN_KEY = 'token';
+const USER_KEY = 'user';
+
+const readCookie = (name) => {
+  if (typeof document === 'undefined') return null;
+  const found = document.cookie
+    .split('; ')
+    .find((row) => row.startsWith(`${name}=`));
+  return found ? decodeURIComponent(found.split('=')[1]) : null;
+};
+
+const writeCookie = (name, value, days = 7) => {
+  if (typeof document === 'undefined') return;
+  const expires = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toUTCString();
+  document.cookie = `${name}=${encodeURIComponent(value)}; expires=${expires}; path=/; SameSite=Lax`;
+};
+
+const deleteCookie = (name) => {
+  if (typeof document === 'undefined') return;
+  document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax`;
+};
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
@@ -14,14 +36,40 @@ export function AuthProvider({ children }) {
 
   // Initialize from localStorage
   useEffect(() => {
-    const savedToken = localStorage.getItem('token');
-    const savedUser = localStorage.getItem('user');
-    if (savedToken && savedUser) {
-      setToken(savedToken);
-      setUser(JSON.parse(savedUser));
-      connectSocket(savedToken);
-    }
-    setLoading(false);
+    const initAuth = async () => {
+      const savedToken = localStorage.getItem(TOKEN_KEY) || readCookie(TOKEN_KEY);
+      const savedUser = localStorage.getItem(USER_KEY);
+
+      if (!savedToken) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        setToken(savedToken);
+        localStorage.setItem(TOKEN_KEY, savedToken);
+        writeCookie(TOKEN_KEY, savedToken);
+        connectSocket(savedToken);
+
+        const meRes = await api.get('/auth/me');
+        setUser(meRes.data.user);
+        localStorage.setItem(USER_KEY, JSON.stringify(meRes.data.user));
+      } catch {
+        setToken(null);
+        setUser(null);
+        localStorage.removeItem(TOKEN_KEY);
+        localStorage.removeItem(USER_KEY);
+        deleteCookie(TOKEN_KEY);
+        disconnectSocket();
+        if (savedUser) {
+          localStorage.removeItem(USER_KEY);
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    initAuth();
   }, []);
 
   const login = useCallback(async (email, password) => {
@@ -29,8 +77,9 @@ export function AuthProvider({ children }) {
     const { token: newToken, user: userData } = res.data;
     setToken(newToken);
     setUser(userData);
-    localStorage.setItem('token', newToken);
-    localStorage.setItem('user', JSON.stringify(userData));
+    localStorage.setItem(TOKEN_KEY, newToken);
+    localStorage.setItem(USER_KEY, JSON.stringify(userData));
+    writeCookie(TOKEN_KEY, newToken);
     connectSocket(newToken);
     return userData;
   }, []);
@@ -40,8 +89,9 @@ export function AuthProvider({ children }) {
     const { token: newToken, user: userData } = res.data;
     setToken(newToken);
     setUser(userData);
-    localStorage.setItem('token', newToken);
-    localStorage.setItem('user', JSON.stringify(userData));
+    localStorage.setItem(TOKEN_KEY, newToken);
+    localStorage.setItem(USER_KEY, JSON.stringify(userData));
+    writeCookie(TOKEN_KEY, newToken);
     connectSocket(newToken);
     return userData;
   }, []);
@@ -49,15 +99,16 @@ export function AuthProvider({ children }) {
   const logout = useCallback(() => {
     setToken(null);
     setUser(null);
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+    deleteCookie(TOKEN_KEY);
     disconnectSocket();
   }, []);
 
   const updateUser = useCallback((data) => {
     setUser(prev => {
       const updated = { ...prev, ...data };
-      localStorage.setItem('user', JSON.stringify(updated));
+      localStorage.setItem(USER_KEY, JSON.stringify(updated));
       return updated;
     });
   }, []);

@@ -21,43 +21,26 @@ const router = express.Router();
  */
 router.get('/', async (req, res, next) => {
   try {
-    const { category, search, page = 1, limit = 50, all } = req.query;
-    let sql = 'SELECT * FROM products WHERE 1=1';
+    const allowedCategories = ['Water Products', 'Containers', 'Accessories'];
+    const { category } = req.query;
+
+    let sql = 'SELECT * FROM products WHERE is_active = 1';
     const params = [];
 
-    // If not requesting all (admin view), only show active
-    if (!all) {
-      sql += ' AND is_active = 1';
-    }
-
     if (category) {
+      if (!allowedCategories.includes(category)) {
+        return res.status(400).json({ error: 'Invalid category filter' });
+      }
       sql += ' AND category = ?';
       params.push(category);
-    }
-    if (search) {
-      sql += ' AND (name LIKE ? OR description LIKE ?)';
-      params.push(`%${search}%`, `%${search}%`);
     }
 
     sql += ' ORDER BY category, name';
 
-    const countSql = sql.replace('SELECT *', 'SELECT COUNT(*) as total');
-    const [countResult] = await pool.query(countSql, params);
-
-    sql += ' LIMIT ? OFFSET ?';
-    params.push(parseInt(limit), (parseInt(page) - 1) * parseInt(limit));
-
     const [products] = await pool.query(sql, params);
 
-    res.json({
-      products,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total: countResult[0].total,
-        totalPages: Math.ceil(countResult[0].total / parseInt(limit)),
-      },
-    });
+    // Return array directly; empty result is [] and is not an error.
+    res.json(products);
   } catch (err) {
     next(err);
   }
@@ -84,12 +67,13 @@ router.get('/:id', async (req, res, next) => {
  */
 router.post('/', authenticate, authorize('admin'), [
   body('name').trim().notEmpty().withMessage('Product name is required'),
-  body('category').isIn(['water_gallon', 'water_bottle', 'container', 'accessory', 'other']),
+  body('category').isIn(['Water Products', 'Containers', 'Accessories']),
   body('price').isFloat({ min: 0 }).withMessage('Price must be a positive number'),
   body('stock_quantity').isInt({ min: 0 }).withMessage('Stock must be a non-negative integer'),
   body('unit').optional().trim(),
   body('low_stock_threshold').optional().isInt({ min: 0 }),
   body('description').optional().trim(),
+  body('image_url').optional().isString(),
 ], async (req, res, next) => {
   try {
     const errors = validationResult(req);
@@ -97,11 +81,11 @@ router.post('/', authenticate, authorize('admin'), [
       return res.status(400).json({ error: 'Validation failed', errors: errors.array() });
     }
 
-    const { name, description, category, price, stock_quantity, unit, low_stock_threshold } = req.body;
+    const { name, description, category, price, stock_quantity, unit, low_stock_threshold, image_url } = req.body;
 
     const [result] = await pool.query(
-      'INSERT INTO products (name, description, category, price, stock_quantity, unit, low_stock_threshold) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [name, description || null, category, price, stock_quantity || 0, unit || 'gallon', low_stock_threshold || 10]
+      'INSERT INTO products (name, description, category, price, stock_quantity, unit, low_stock_threshold, image_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [name, description || null, category, price, stock_quantity || 0, unit || 'gallon', low_stock_threshold || 10, image_url || null]
     );
 
     // Log initial stock
@@ -125,16 +109,17 @@ router.post('/', authenticate, authorize('admin'), [
  */
 router.put('/:id', authenticate, authorize('admin'), [
   body('name').optional().trim().notEmpty(),
-  body('category').optional().isIn(['water_gallon', 'water_bottle', 'container', 'accessory', 'other']),
+  body('category').optional().isIn(['Water Products', 'Containers', 'Accessories']),
   body('price').optional().isFloat({ min: 0 }),
   body('unit').optional().trim(),
   body('low_stock_threshold').optional().isInt({ min: 0 }),
   body('description').optional().trim(),
+  body('image_url').optional().isString(),
   body('is_active').optional().isBoolean(),
 ], async (req, res, next) => {
   try {
     const { id } = req.params;
-    const fields = ['name', 'description', 'category', 'price', 'unit', 'low_stock_threshold', 'is_active'];
+    const fields = ['name', 'description', 'category', 'price', 'unit', 'low_stock_threshold', 'image_url', 'is_active'];
     const updates = [];
     const values = [];
 

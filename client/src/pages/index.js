@@ -1,12 +1,39 @@
 /**
  * Homepage - Public landing page
  */
+import { useEffect } from 'react';
 import Link from 'next/link';
 import Navbar from '../components/layout/Navbar';
 import { Droplets, Truck, ShieldCheck, Star, ArrowRight, Phone, MapPin } from 'lucide-react';
 import Head from 'next/head';
+import { useRouter } from 'next/router';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function Home() {
+  const router = useRouter();
+  const { user } = useAuth();
+
+  useEffect(() => {
+    if (!user) return;
+
+    switch (user.role) {
+      case 'admin':
+        router.replace('/admin');
+        break;
+      case 'refiller':
+        router.replace('/refiller');
+        break;
+      case 'delivery':
+        router.replace('/delivery');
+        break;
+      default:
+        router.replace('/orders');
+        break;
+    }
+  }, [user, router]);
+
+  if (user) return null;
+
   return (
     <>
       <Head>

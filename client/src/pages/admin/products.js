@@ -22,16 +22,16 @@ export default function AdminProducts() {
   const [stockProduct, setStockProduct] = useState(null);
   const [stockAdj, setStockAdj] = useState({ type: 'add', quantity: 0, reason: '' });
   const [form, setForm] = useState({
-    name: '', description: '', category: 'water', unit: 'gallon',
-    price: '', stock_quantity: '', reorder_level: 10, is_active: true
+    name: '', description: '', category: 'Water Products', image_url: '',
+    price: '', stock_quantity: '', low_stock_threshold: 10, is_active: true
   });
 
   useEffect(() => { fetchProducts(); }, []);
 
   const fetchProducts = async () => {
     try {
-      const res = await api.get('/products/admin/all');
-      setProducts(res.data.products);
+      const res = await api.get('/products');
+      setProducts(Array.isArray(res.data) ? res.data : (res.data.products || []));
     } catch { toast.error('Failed to load products'); }
     finally { setLoading(false); }
   };
@@ -43,7 +43,13 @@ export default function AdminProducts() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      const data = { ...form, price: parseFloat(form.price), stock_quantity: parseInt(form.stock_quantity), reorder_level: parseInt(form.reorder_level) };
+      const data = {
+        ...form,
+        price: parseFloat(form.price),
+        stock_quantity: parseInt(form.stock_quantity),
+        low_stock_threshold: parseInt(form.low_stock_threshold),
+      };
+
       if (editProduct) {
         await api.put(`/products/${editProduct.id}`, data);
         toast.success('Product updated');
@@ -69,22 +75,54 @@ export default function AdminProducts() {
   const handleStockAdj = async (e) => {
     e.preventDefault();
     try {
-      await api.post(`/products/${stockProduct.id}/adjust-stock`, stockAdj);
+      const change = stockAdj.type === 'subtract'
+        ? -Math.abs(parseInt(stockAdj.quantity) || 0)
+        : Math.abs(parseInt(stockAdj.quantity) || 0);
+
+      await api.put(`/products/${stockProduct.id}/stock`, {
+        change_quantity: change,
+        reason: stockAdj.reason,
+      });
       toast.success('Stock adjusted');
       setStockModal(false);
       fetchProducts();
     } catch (err) { toast.error(err.response?.data?.error || 'Failed'); }
   };
 
+  const handleImageFile = (file) => {
+    if (!file) return;
+
+    const allowed = ['image/jpeg', 'image/png'];
+    if (!allowed.includes(file.type)) {
+      toast.error('Only JPG and PNG files are allowed');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setForm((prev) => ({ ...prev, image_url: reader.result }));
+    };
+    reader.readAsDataURL(file);
+  };
+
   const openCreate = () => {
     setEditProduct(null);
-    setForm({ name: '', description: '', category: 'water', unit: 'gallon', price: '', stock_quantity: '', reorder_level: 10, is_active: true });
+    setForm({ name: '', description: '', category: 'Water Products', image_url: '', price: '', stock_quantity: '', low_stock_threshold: 10, is_active: true });
     setModalOpen(true);
   };
 
   const openEdit = (p) => {
     setEditProduct(p);
-    setForm({ name: p.name, description: p.description || '', category: p.category, unit: p.unit, price: p.price, stock_quantity: p.stock_quantity, reorder_level: p.reorder_level, is_active: p.is_active });
+    setForm({
+      name: p.name,
+      description: p.description || '',
+      category: p.category,
+      image_url: p.image_url || '',
+      price: p.price,
+      stock_quantity: p.stock_quantity,
+      low_stock_threshold: p.low_stock_threshold,
+      is_active: p.is_active,
+    });
     setModalOpen(true);
   };
 
@@ -108,11 +146,14 @@ export default function AdminProducts() {
       ) : (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {filtered.map(p => (
-            <div key={p.id} className={`card border-l-4 ${p.stock_quantity <= p.reorder_level ? 'border-l-red-400' : 'border-l-green-400'}`}>
+            <div key={p.id} className={`card border-l-4 ${p.stock_quantity <= p.low_stock_threshold ? 'border-l-red-400' : 'border-l-green-400'}`}>
+              {p.image_url && (
+                <img src={p.image_url} alt={p.name} className="w-full h-36 object-cover rounded-lg mb-3" />
+              )}
               <div className="flex justify-between items-start">
                 <div>
                   <h3 className="font-semibold text-gray-900">{p.name}</h3>
-                  <p className="text-sm text-gray-500">{p.category} &middot; {p.unit}</p>
+                  <p className="text-sm text-gray-500">{p.category}</p>
                 </div>
                 <span className={`badge ${p.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                   {p.is_active ? 'Active' : 'Inactive'}
@@ -121,10 +162,10 @@ export default function AdminProducts() {
               <div className="mt-3 flex justify-between items-center">
                 <span className="text-xl font-bold text-primary-600">{formatCurrency(p.price)}</span>
                 <div className="text-right">
-                  <p className={`text-sm font-medium ${p.stock_quantity <= p.reorder_level ? 'text-red-600' : 'text-gray-700'}`}>
+                  <p className={`text-sm font-medium ${p.stock_quantity <= p.low_stock_threshold ? 'text-red-600' : 'text-gray-700'}`}>
                     Stock: {p.stock_quantity}
                   </p>
-                  <p className="text-xs text-gray-400">Reorder at {p.reorder_level}</p>
+                  <p className="text-xs text-gray-400">Reorder at {p.low_stock_threshold}</p>
                 </div>
               </div>
               {p.description && <p className="text-xs text-gray-400 mt-2 line-clamp-2">{p.description}</p>}
@@ -160,22 +201,24 @@ export default function AdminProducts() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
               <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })} className="input-field">
-                <option value="water">Water</option>
-                <option value="container">Container</option>
-                <option value="accessory">Accessory</option>
-                <option value="other">Other</option>
+                <option value="Water Products">Water Products</option>
+                <option value="Containers">Containers</option>
+                <option value="Accessories">Accessories</option>
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Unit</label>
-              <select value={form.unit} onChange={e => setForm({ ...form, unit: e.target.value })} className="input-field">
-                <option value="gallon">Gallon</option>
-                <option value="liter">Liter</option>
-                <option value="bottle">Bottle</option>
-                <option value="piece">Piece</option>
-              </select>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Product Image (JPG/PNG)</label>
+              <input
+                type="file"
+                accept="image/jpeg,image/png"
+                onChange={(e) => handleImageFile(e.target.files?.[0])}
+                className="input-field"
+              />
             </div>
           </div>
+          {form.image_url && (
+            <img src={form.image_url} alt="Preview" className="w-full h-40 object-cover rounded-lg border border-gray-200" />
+          )}
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Price (₱)</label>
@@ -187,7 +230,7 @@ export default function AdminProducts() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Reorder Level</label>
-              <input type="number" min="0" value={form.reorder_level} onChange={e => setForm({ ...form, reorder_level: e.target.value })} className="input-field" />
+              <input type="number" min="0" value={form.low_stock_threshold} onChange={e => setForm({ ...form, low_stock_threshold: e.target.value })} className="input-field" />
             </div>
           </div>
           <label className="flex items-center gap-2">

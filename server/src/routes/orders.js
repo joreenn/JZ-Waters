@@ -78,14 +78,15 @@ router.post('/', authorize('customer', 'admin'), [
       subtotal += product.price * item.quantity;
     }
 
-    // Get delivery fee
+    // Delivery fee is computed as zone rate per gallon multiplied by ordered gallons.
+    const totalGallons = orderItems.reduce((sum, item) => sum + Number(item.quantity), 0);
     let deliveryFee = 0;
     if (zone_id) {
       const [zones] = await conn.query('SELECT delivery_fee FROM zones WHERE id = ? AND is_active = 1', [zone_id]);
-      deliveryFee = zones.length ? Number(zones[0].delivery_fee) : 0;
+      deliveryFee = zones.length ? Number(zones[0].delivery_fee) * totalGallons : 0;
     } else {
       const [settings] = await conn.query('SELECT setting_value FROM settings WHERE setting_key = "default_delivery_fee"');
-      deliveryFee = settings.length ? Number(settings[0].setting_value) : 0;
+      deliveryFee = settings.length ? Number(settings[0].setting_value) * totalGallons : 0;
     }
 
     // Handle loyalty points redemption
@@ -189,9 +190,7 @@ router.get('/', async (req, res, next) => {
   try {
     const { status, date_from, date_to, page = 1, limit = 20 } = req.query;
     let sql = `
-      SELECT o.*, u.name as customer_name, u.email as customer_email, z.name as zone_name,
-      (SELECT JSON_ARRAYAGG(JSON_OBJECT('id', oi.id, 'product_id', oi.product_id, 'quantity', oi.quantity, 'unit_price', oi.unit_price, 'product_name', p.name))
-       FROM order_items oi JOIN products p ON oi.product_id = p.id WHERE oi.order_id = o.id) as items
+      SELECT o.*, u.name as customer_name, u.email as customer_email, z.name as zone_name
       FROM orders o
       JOIN users u ON o.customer_id = u.id
       LEFT JOIN zones z ON o.zone_id = z.id
@@ -242,10 +241,30 @@ router.get('/', async (req, res, next) => {
 
     const [orders] = await pool.query(sql, params);
 
-    // Parse JSON items
-    const parsedOrders = orders.map(o => ({
+    // Fetch items in a second query for broad MySQL compatibility.
+    let itemsByOrder = {};
+    if (orders.length > 0) {
+      const orderIds = orders.map((o) => o.id);
+      const placeholders = orderIds.map(() => '?').join(',');
+      const [items] = await pool.query(
+        `SELECT oi.id, oi.order_id, oi.product_id, oi.quantity, oi.unit_price, p.name as product_name
+         FROM order_items oi
+         JOIN products p ON oi.product_id = p.id
+         WHERE oi.order_id IN (${placeholders})
+         ORDER BY oi.id`,
+        orderIds
+      );
+
+      itemsByOrder = items.reduce((acc, item) => {
+        if (!acc[item.order_id]) acc[item.order_id] = [];
+        acc[item.order_id].push(item);
+        return acc;
+      }, {});
+    }
+
+    const parsedOrders = orders.map((o) => ({
       ...o,
-      items: typeof o.items === 'string' ? JSON.parse(o.items) : o.items,
+      items: itemsByOrder[o.id] || [],
     }));
 
     res.json({
@@ -368,7 +387,7 @@ router.put('/:id/status', authorize('admin', 'delivery'), [
       const [items] = await conn.query(`
         SELECT oi.quantity, p.category FROM order_items oi
         JOIN products p ON oi.product_id = p.id
-        WHERE oi.order_id = ? AND p.category IN ('water_gallon')
+        WHERE oi.order_id = ? AND p.category = 'Water Products' AND p.name = 'Gallon of Water'
       `, [id]);
 
       const totalGallons = items.reduce((sum, i) => sum + i.quantity, 0);

@@ -1,134 +1,182 @@
 /**
- * Customer - Loyalty Points Page
+ * Customer - Loyalty Progress Page
  */
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
+import Link from 'next/link';
 import Navbar from '../components/layout/Navbar';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import EmptyState from '../components/ui/EmptyState';
-import { useAuth } from '../contexts/AuthContext';
+import StatusBadge from '../components/ui/StatusBadge';
 import api from '../lib/api';
-import { Gift, Star, ArrowUp, ArrowDown, TrendingUp } from 'lucide-react';
+import { Gift, Star, Trophy, Clock4 } from 'lucide-react';
 import { formatCurrency, formatDateTime } from '../../../shared/helpers';
 import toast from 'react-hot-toast';
 
 export default function Loyalty() {
-  const { user } = useAuth();
-  const [balance, setBalance] = useState(null);
+  const [summary, setSummary] = useState(null);
   const [history, setHistory] = useState([]);
+  const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [progressWidth, setProgressWidth] = useState(0);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [bRes, hRes] = await Promise.all([
+        const [balanceRes, historyRes, ordersRes] = await Promise.all([
           api.get('/loyalty/balance'),
-          api.get('/loyalty/history')
+          api.get('/loyalty/history'),
+          api.get('/orders', { params: { limit: 8 } }),
         ]);
-        setBalance(bRes.data);
-        setHistory(hRes.data.history || []);
-      } catch { toast.error('Failed to load loyalty data'); }
-      finally { setLoading(false); }
+
+        setSummary(balanceRes.data || null);
+        setHistory(historyRes.data.history || []);
+        setOrders((ordersRes.data.orders || []).slice(0, 6));
+      } catch {
+        toast.error('Failed to load loyalty data');
+      } finally {
+        setLoading(false);
+      }
     };
+
     fetchData();
   }, []);
 
+  useEffect(() => {
+    if (!summary) return;
+    const timer = setTimeout(() => {
+      const target = Number(summary.progress_percent || 0);
+      setProgressWidth(Math.max(0, Math.min(100, target)));
+    }, 120);
+
+    return () => clearTimeout(timer);
+  }, [summary]);
+
+  const gallonsToNextReward = useMemo(() => {
+    if (!summary) return 0;
+    return Math.max(0, Number(summary.pesos_to_next_reward || 0));
+  }, [summary]);
+
   return (
     <>
-      <Head><title>Loyalty Points - JZ Waters</title></Head>
+      <Head><title>Loyalty Progress - JZ Waters</title></Head>
       <Navbar />
       <div className="min-h-screen bg-gray-50 pt-20">
-        <div className="max-w-4xl mx-auto px-4 py-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-8">Loyalty Points</h1>
+        <div className="max-w-5xl mx-auto px-4 py-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Loyalty Progress</h1>
+          <p className="text-gray-500 mb-8">Every {formatCurrency(summary?.pesos_per_percent || 150)} in purchases = 1%. Reach 100% to earn 1 free gallon.</p>
 
           {loading ? <LoadingSpinner /> : (
             <>
-              {/* Balance Card */}
-              <div className="bg-gradient-to-r from-primary-600 to-blue-600 rounded-2xl text-white p-8 mb-8">
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
-                    <Star className="w-6 h-6" />
+              <div className="bg-gradient-to-r from-primary-600 to-blue-600 rounded-2xl text-white p-6 md:p-8 mb-8 shadow-lg">
+                <div className="grid md:grid-cols-3 gap-6">
+                  <div className="md:col-span-2">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="w-10 h-10 bg-white/20 rounded-full flex items-center justify-center">
+                        <Trophy className="w-5 h-5" />
+                      </div>
+                      <p className="text-white/90 font-medium">Free Gallon Reward Meter</p>
+                    </div>
+
+                    <div className="w-full h-4 bg-white/20 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-white rounded-full transition-all duration-1000 ease-out"
+                        style={{ width: `${progressWidth}%` }}
+                      />
+                    </div>
+
+                    <div className="flex justify-between text-xs text-white/80 mt-2">
+                      <span>0%</span>
+                      <span>25%</span>
+                      <span>50%</span>
+                      <span>75%</span>
+                      <span>100%</span>
+                    </div>
+
+                    <div className="mt-4 text-sm text-white/90">
+                      <p>
+                        Current progress: <span className="font-bold text-white">{Number(summary?.progress_percent || 0)}%</span>
+                        {' '}({formatCurrency(summary?.pesos_in_current_cycle || 0)} / {formatCurrency(summary?.pesos_for_one_reward || 15000)})
+                      </p>
+                      <p className="mt-1">
+                        {gallonsToNextReward === 0
+                          ? 'Reward unlocked. You earned 1 free gallon!'
+                          : `${formatCurrency(gallonsToNextReward)} more purchases needed for a free gallon.`}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-white/80 text-sm">Available Points</p>
-                    <p className="text-4xl font-bold">{balance?.balance || 0}</p>
-                  </div>
-                </div>
-                <div className="flex gap-6 text-sm text-white/80">
-                  <div>
-                    <p>Cash Value</p>
-                    <p className="text-lg font-bold text-white">{formatCurrency(balance?.peso_value || 0)}</p>
-                  </div>
-                  <div>
-                    <p>Total Earned</p>
-                    <p className="text-lg font-bold text-white">{balance?.total_earned || 0} pts</p>
-                  </div>
-                  <div>
-                    <p>Total Redeemed</p>
-                    <p className="text-lg font-bold text-white">{balance?.total_redeemed || 0} pts</p>
+
+                  <div className="bg-white/10 rounded-xl p-4">
+                    <p className="text-white/80 text-sm">Free Gallons Earned</p>
+                    <p className="text-3xl font-bold mt-1">{summary?.free_gallons_earned || 0}</p>
+                    <div className="mt-4 text-xs space-y-1 text-white/80">
+                      <p>Total Purchases: {formatCurrency(summary?.total_purchase_amount || 0)}</p>
+                      <p>Total Orders: {summary?.total_purchase_count || 0}</p>
+                      <p>Delivered Orders: {summary?.delivered_orders || 0}</p>
+                      <p>Cancelled Orders: {summary?.cancelled_orders || 0}</p>
+                    </div>
                   </div>
                 </div>
               </div>
 
-              {/* How it works */}
               <div className="card mb-8">
-                <h3 className="font-semibold text-gray-900 mb-3">How It Works</h3>
-                <div className="grid sm:grid-cols-3 gap-4 text-sm">
-                  <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 bg-primary-100 rounded-full flex items-center justify-center flex-shrink-0">
-                      <TrendingUp className="w-4 h-4 text-primary-600" />
-                    </div>
-                    <div>
-                      <p className="font-medium">Earn Points</p>
-                      <p className="text-gray-500">Earn 1 point per ₱10 spent on delivered orders</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 bg-primary-100 rounded-full flex items-center justify-center flex-shrink-0">
-                      <Gift className="w-4 h-4 text-primary-600" />
-                    </div>
-                    <div>
-                      <p className="font-medium">Redeem</p>
-                      <p className="text-gray-500">Use points as discount at checkout</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 bg-primary-100 rounded-full flex items-center justify-center flex-shrink-0">
-                      <Star className="w-4 h-4 text-primary-600" />
-                    </div>
-                    <div>
-                      <p className="font-medium">Value</p>
-                      <p className="text-gray-500">Each point is worth ₱0.10</p>
-                    </div>
-                  </div>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-semibold text-gray-900">Connected Purchase History</h3>
+                  <Link href="/orders" className="text-sm text-primary-600 hover:text-primary-700 font-medium">View Purchase History</Link>
                 </div>
-              </div>
 
-              {/* History */}
-              <div className="card">
-                <h3 className="font-semibold text-gray-900 mb-4">Points History</h3>
-                {history.length === 0 ? (
-                  <EmptyState icon={Gift} title="No points history" message="Start ordering to earn loyalty points!" />
+                {orders.length === 0 ? (
+                  <EmptyState icon={Clock4} title="No purchases yet" message="Delivered and cancelled purchases appear here." />
                 ) : (
                   <div className="space-y-3">
-                    {history.map(h => (
-                      <div key={h.id} className="flex items-center justify-between py-2 border-b border-gray-50">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${h.points > 0 ? 'bg-green-100' : 'bg-red-100'}`}>
-                            {h.points > 0 ? <ArrowUp className="w-4 h-4 text-green-600" /> : <ArrowDown className="w-4 h-4 text-red-600" />}
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium">{h.description}</p>
-                            <p className="text-xs text-gray-400">{formatDateTime(h.created_at)}</p>
-                          </div>
+                    {orders.map((order) => (
+                      <div key={order.id} className="border border-gray-100 rounded-lg p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                        <div>
+                          <p className="font-medium text-gray-900">{order.order_number || `Order #${order.id}`}</p>
+                          <p className="text-xs text-gray-500">{formatDateTime(order.created_at)}</p>
                         </div>
-                        <span className={`font-bold ${h.points > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {h.points > 0 ? '+' : ''}{h.points}
-                        </span>
+                        <div className="flex items-center gap-3">
+                          <StatusBadge status={order.status} />
+                          <span className="font-semibold text-primary-600">{formatCurrency(order.total_amount || 0)}</span>
+                        </div>
                       </div>
                     ))}
                   </div>
                 )}
+              </div>
+
+              <div className="grid lg:grid-cols-3 gap-6">
+                <div className="card lg:col-span-1">
+                  <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                    <Star className="w-4 h-4 text-primary-600" /> Points Wallet
+                  </h3>
+                  <p className="text-sm text-gray-500">Available Points</p>
+                  <p className="text-3xl font-bold text-primary-600 mt-1">{summary?.points_balance || 0}</p>
+                  <p className="text-sm text-gray-500 mt-2">Cash Value: {formatCurrency(summary?.peso_value || 0)}</p>
+                </div>
+
+                <div className="card lg:col-span-2">
+                  <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                    <Gift className="w-4 h-4 text-primary-600" /> Points Activity
+                  </h3>
+                  {history.length === 0 ? (
+                    <EmptyState icon={Gift} title="No points activity" message="Points updates appear here after order status updates." />
+                  ) : (
+                    <div className="space-y-3 max-h-72 overflow-auto pr-1">
+                      {history.map((entry) => (
+                        <div key={entry.id} className="flex items-center justify-between py-2 border-b border-gray-50">
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">{entry.description || 'Loyalty update'}</p>
+                            <p className="text-xs text-gray-400">{formatDateTime(entry.created_at)}</p>
+                          </div>
+                          <div className={`text-sm font-bold ${Number(entry.points) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {Number(entry.points) >= 0 ? '+' : ''}{entry.points}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </>
           )}

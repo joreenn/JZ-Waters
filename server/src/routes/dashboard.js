@@ -14,6 +14,49 @@ const PDFDocument = require('pdfkit');
 const router = express.Router();
 router.use(authenticate, authorize('admin'));
 
+const toNumber = (value) => Number(value || 0);
+
+function mergePeriodRows(refillRows, deliveryRows, keyField, labelField = keyField) {
+  const map = new Map();
+
+  for (const row of refillRows) {
+    map.set(row[keyField], {
+      period_key: row[keyField],
+      period: row[labelField],
+      refill_revenue: toNumber(row.refill_revenue),
+      delivery_revenue: 0,
+      refill_count: toNumber(row.refill_count),
+      delivery_count: 0,
+    });
+  }
+
+  for (const row of deliveryRows) {
+    const existing = map.get(row[keyField]) || {
+      period_key: row[keyField],
+      period: row[labelField],
+      refill_revenue: 0,
+      delivery_revenue: 0,
+      refill_count: 0,
+      delivery_count: 0,
+    };
+
+    existing.delivery_revenue = toNumber(row.delivery_revenue);
+    existing.delivery_count = toNumber(row.delivery_count);
+    if (!existing.period) {
+      existing.period = row[labelField];
+    }
+    map.set(row[keyField], existing);
+  }
+
+  return Array.from(map.values())
+    .sort((a, b) => String(a.period_key).localeCompare(String(b.period_key)))
+    .map((row) => ({
+      ...row,
+      total_revenue: row.refill_revenue + row.delivery_revenue,
+      total_orders: row.refill_count + row.delivery_count,
+    }));
+}
+
 /**
  * GET /api/dashboard/admin
  * Admin dashboard summary cards and charts
@@ -170,6 +213,211 @@ router.get('/sales', async (req, res, next) => {
       : 0;
 
     res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/reports/analytics
+ * Combined analytics for charts and insight cards
+ */
+router.get('/analytics', async (req, res, next) => {
+  try {
+    const { start_date, end_date } = req.query;
+
+    const refillDateFilter = [];
+    const refillParams = [];
+    if (start_date) {
+      refillDateFilter.push('DATE(created_at) >= ?');
+      refillParams.push(start_date);
+    }
+    if (end_date) {
+      refillDateFilter.push('DATE(created_at) <= ?');
+      refillParams.push(end_date);
+    }
+    const refillWhere = refillDateFilter.length ? `WHERE ${refillDateFilter.join(' AND ')}` : '';
+
+    const orderDateFilter = ['status = "delivered"'];
+    const orderParams = [];
+    if (start_date) {
+      orderDateFilter.push('DATE(created_at) >= ?');
+      orderParams.push(start_date);
+    }
+    if (end_date) {
+      orderDateFilter.push('DATE(created_at) <= ?');
+      orderParams.push(end_date);
+    }
+    const orderWhere = `WHERE ${orderDateFilter.join(' AND ')}`;
+
+    const [dailyRefills] = await pool.query(
+      `SELECT
+        DATE(created_at) AS period_key,
+        DATE_FORMAT(DATE(created_at), '%b %d') AS period,
+        COALESCE(SUM(total), 0) AS refill_revenue,
+        COUNT(*) AS refill_count
+       FROM refill_transactions
+       ${refillWhere}
+       GROUP BY DATE(created_at)
+       ORDER BY DATE(created_at) ASC`,
+      refillParams
+    );
+
+    const [dailyDeliveries] = await pool.query(
+      `SELECT
+        DATE(created_at) AS period_key,
+        DATE_FORMAT(DATE(created_at), '%b %d') AS period,
+        COALESCE(SUM(total_amount), 0) AS delivery_revenue,
+        COUNT(*) AS delivery_count
+       FROM orders
+       ${orderWhere}
+       GROUP BY DATE(created_at)
+       ORDER BY DATE(created_at) ASC`,
+      orderParams
+    );
+
+    const [weeklyRefills] = await pool.query(
+      `SELECT
+        CONCAT(YEAR(created_at), '-', LPAD(WEEK(created_at, 1), 2, '0')) AS period_key,
+        DATE_FORMAT(DATE_SUB(DATE(created_at), INTERVAL WEEKDAY(created_at) DAY), '%b %d') AS period,
+        COALESCE(SUM(total), 0) AS refill_revenue,
+        COUNT(*) AS refill_count
+       FROM refill_transactions
+       ${refillWhere}
+       GROUP BY YEAR(created_at), WEEK(created_at, 1)
+       ORDER BY YEAR(created_at), WEEK(created_at, 1)`,
+      refillParams
+    );
+
+    const [weeklyDeliveries] = await pool.query(
+      `SELECT
+        CONCAT(YEAR(created_at), '-', LPAD(WEEK(created_at, 1), 2, '0')) AS period_key,
+        DATE_FORMAT(DATE_SUB(DATE(created_at), INTERVAL WEEKDAY(created_at) DAY), '%b %d') AS period,
+        COALESCE(SUM(total_amount), 0) AS delivery_revenue,
+        COUNT(*) AS delivery_count
+       FROM orders
+       ${orderWhere}
+       GROUP BY YEAR(created_at), WEEK(created_at, 1)
+       ORDER BY YEAR(created_at), WEEK(created_at, 1)`,
+      orderParams
+    );
+
+    const [monthlyRefills] = await pool.query(
+      `SELECT
+        DATE_FORMAT(created_at, '%Y-%m') AS period_key,
+        DATE_FORMAT(created_at, '%b %Y') AS period,
+        COALESCE(SUM(total), 0) AS refill_revenue,
+        COUNT(*) AS refill_count
+       FROM refill_transactions
+       ${refillWhere}
+       GROUP BY DATE_FORMAT(created_at, '%Y-%m')
+       ORDER BY DATE_FORMAT(created_at, '%Y-%m') ASC`,
+      refillParams
+    );
+
+    const [monthlyDeliveries] = await pool.query(
+      `SELECT
+        DATE_FORMAT(created_at, '%Y-%m') AS period_key,
+        DATE_FORMAT(created_at, '%b %Y') AS period,
+        COALESCE(SUM(total_amount), 0) AS delivery_revenue,
+        COUNT(*) AS delivery_count
+       FROM orders
+       ${orderWhere}
+       GROUP BY DATE_FORMAT(created_at, '%Y-%m')
+       ORDER BY DATE_FORMAT(created_at, '%Y-%m') ASC`,
+      orderParams
+    );
+
+    const topProductParams = [];
+    let topProductWhere = 'WHERE o.status = "delivered"';
+    if (start_date) {
+      topProductWhere += ' AND DATE(o.created_at) >= ?';
+      topProductParams.push(start_date);
+    }
+    if (end_date) {
+      topProductWhere += ' AND DATE(o.created_at) <= ?';
+      topProductParams.push(end_date);
+    }
+
+    const [topProducts] = await pool.query(
+      `SELECT
+        p.id,
+        p.name,
+        p.category,
+        COALESCE(SUM(oi.quantity), 0) AS total_quantity,
+        COALESCE(SUM(oi.quantity * oi.unit_price), 0) AS total_revenue
+       FROM order_items oi
+       JOIN orders o ON oi.order_id = o.id
+       JOIN products p ON oi.product_id = p.id
+       ${topProductWhere}
+       GROUP BY p.id, p.name, p.category
+       ORDER BY total_quantity DESC, total_revenue DESC
+       LIMIT 10`,
+      topProductParams
+    );
+
+    const [summaryRefill] = await pool.query(
+      `SELECT
+        COUNT(*) AS transaction_count,
+        COALESCE(SUM(total), 0) AS revenue
+       FROM refill_transactions
+       ${refillWhere}`,
+      refillParams
+    );
+
+    const [summaryDelivery] = await pool.query(
+      `SELECT
+        COUNT(*) AS transaction_count,
+        COALESCE(SUM(total_amount), 0) AS revenue
+       FROM orders
+       ${orderWhere}`,
+      orderParams
+    );
+
+    const refillRevenue = toNumber(summaryRefill[0]?.revenue);
+    const deliveryRevenue = toNumber(summaryDelivery[0]?.revenue);
+    const refillCount = toNumber(summaryRefill[0]?.transaction_count);
+    const deliveryCount = toNumber(summaryDelivery[0]?.transaction_count);
+    const totalRevenue = refillRevenue + deliveryRevenue;
+    const totalTransactions = refillCount + deliveryCount;
+
+    const daily = mergePeriodRows(dailyRefills, dailyDeliveries, 'period_key');
+    const weekly = mergePeriodRows(weeklyRefills, weeklyDeliveries, 'period_key');
+    const monthly = mergePeriodRows(monthlyRefills, monthlyDeliveries, 'period_key');
+
+    const bestDay = [...daily].sort((a, b) => b.total_revenue - a.total_revenue)[0] || null;
+    const bestWeek = [...weekly].sort((a, b) => b.total_revenue - a.total_revenue)[0] || null;
+    const bestMonth = [...monthly].sort((a, b) => b.total_revenue - a.total_revenue)[0] || null;
+
+    res.json({
+      summary: {
+        total_revenue: totalRevenue,
+        refill_revenue: refillRevenue,
+        delivery_revenue: deliveryRevenue,
+        total_transactions: totalTransactions,
+        refill_transactions: refillCount,
+        delivery_transactions: deliveryCount,
+        average_order_value: totalTransactions > 0 ? totalRevenue / totalTransactions : 0,
+        top_product_name: topProducts[0]?.name || null,
+      },
+      insights: {
+        best_day: bestDay,
+        best_week: bestWeek,
+        best_month: bestMonth,
+      },
+      trends: {
+        daily,
+        weekly,
+        monthly,
+      },
+      top_products: topProducts.map((p) => ({
+        id: p.id,
+        name: p.name,
+        category: p.category,
+        total_quantity: toNumber(p.total_quantity),
+        total_revenue: toNumber(p.total_revenue),
+      })),
+    });
   } catch (err) {
     next(err);
   }

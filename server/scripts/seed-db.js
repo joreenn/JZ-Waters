@@ -41,39 +41,53 @@ async function seedDatabase() {
 
   // Seed zones
   const zones = [
-    ['Barangay Uno', 20.00],
-    ['Barangay Dos', 25.00],
-    ['Barangay Tres', 30.00],
-    ['Barangay Cuatro', 35.00],
-    ['Barangay Cinco', 40.00],
-    ['Downtown Area', 15.00],
-    ['Uptown Area', 50.00],
+    ['Tagum Downtown', 5.00],
+    ['La Filipina', 10.00],
+    ['San Miguel', 10.00],
+    ['Terminal', 10.00],
+    ['Maco', 10.00],
   ];
 
-  for (const z of zones) {
+  // Deactivate all old zones first so checkout only shows the new list.
+  await connection.query('UPDATE zones SET is_active = 0');
+
+  // Prevent duplicate active zones for the same name.
+  for (const [name, fee] of zones) {
+    await connection.query('UPDATE zones SET is_active = 0 WHERE name = ?', [name]);
     await connection.query(
-      'INSERT IGNORE INTO zones (name, delivery_fee) VALUES (?, ?)',
-      z
+      'INSERT INTO zones (name, delivery_fee, is_active) VALUES (?, ?, 1)',
+      [name, fee]
     );
   }
   console.log('📍 Zones seeded');
 
-  // Seed products
+  // Replace product catalog with the required standardized product list.
+  await connection.query('SET FOREIGN_KEY_CHECKS = 0');
+  await connection.query('TRUNCATE TABLE inventory_logs');
+  await connection.query('TRUNCATE TABLE subscription_items');
+  await connection.query('TRUNCATE TABLE order_items');
+  await connection.query('TRUNCATE TABLE products');
+  await connection.query('SET FOREIGN_KEY_CHECKS = 1');
+
   const products = [
-    ['Round Slim Gallon (5 gal)', 'Premium purified water in 5-gallon slim container', 'water_gallon', 25.00, 100, 'gallon', 10],
-    ['Round Regular Gallon (5 gal)', 'Purified water in standard 5-gallon container', 'water_gallon', 25.00, 80, 'gallon', 10],
-    ['1 Gallon Container', 'Purified water in 1-gallon container', 'water_gallon', 10.00, 50, 'gallon', 10],
-    ['500ml Bottle (24 pack)', 'Purified water bottles - 24 pack', 'water_bottle', 120.00, 30, 'piece', 5],
-    ['350ml Bottle (24 pack)', 'Purified water bottles - 24 pack', 'water_bottle', 95.00, 25, 'piece', 5],
-    ['Empty Slim Container', 'Empty 5-gallon slim container', 'container', 150.00, 20, 'piece', 5],
-    ['Empty Regular Container', 'Empty 5-gallon regular container', 'container', 120.00, 15, 'piece', 5],
-    ['Water Dispenser - Hot & Cold', 'Floor-standing water dispenser', 'accessory', 3500.00, 5, 'piece', 2],
-    ['Water Pump', 'Manual water pump for gallons', 'accessory', 150.00, 20, 'piece', 5],
+    // WATER PRODUCTS
+    ['Gallon of Water', 'Water Products', 25.00, 'Purified gallon water for home and business use', null],
+    ['Plastic Water 500ml', 'Water Products', 15.00, 'Ready-to-drink bottled water (500ml)', null],
+    ['Plastic Water 1L', 'Water Products', 25.00, 'Ready-to-drink bottled water (1 liter)', null],
+
+    // CONTAINERS
+    ['Water Gallon Empty', 'Containers', 120.00, 'Empty refillable water gallon container', null],
+    ['500ml Empty Plastic Bottle', 'Containers', 8.00, 'Empty plastic bottle for 500ml water', null],
+    ['1L Empty Plastic Bottle', 'Containers', 12.00, 'Empty plastic bottle for 1L water', null],
+
+    // ACCESSORIES
+    ['Water Pump', 'Accessories', 180.00, 'Manual water pump for gallon containers', null],
+    ['Water Dispenser', 'Accessories', 3200.00, 'Water dispenser for home and office', null],
   ];
 
   for (const p of products) {
     await connection.query(
-      'INSERT IGNORE INTO products (name, description, category, price, stock_quantity, unit, low_stock_threshold) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO products (name, category, price, description, image_url, stock_quantity, unit, low_stock_threshold, is_active) VALUES (?, ?, ?, ?, ?, 999, "piece", 10, 1)',
       p
     );
   }
