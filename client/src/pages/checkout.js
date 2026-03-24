@@ -32,6 +32,7 @@ export default function Checkout() {
 
   useEffect(() => {
     if (!user) { router.push('/login'); return; }
+    if (user.role === 'delivery') { router.replace('/delivery'); return; }
     if (items.length === 0) { router.push('/cart'); return; }
     const init = async () => {
       try {
@@ -81,7 +82,7 @@ export default function Checkout() {
     } finally { setPlacing(false); }
   };
 
-  if (!user || items.length === 0) return null;
+  if (!user || user.role === 'delivery' || items.length === 0) return null;
 
   return (
     <>

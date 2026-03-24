@@ -13,6 +13,40 @@ const { notifyOrderStatus, createNotification } = require('../services/notificat
 const router = express.Router();
 router.use(authenticate);
 
+async function attachOrderItems(rows) {
+  if (!rows.length) return rows;
+
+  const orderIds = [...new Set(rows.map((row) => row.order_id).filter(Boolean))];
+  if (!orderIds.length) {
+    return rows.map((row) => ({ ...row, items: [] }));
+  }
+
+  const placeholders = orderIds.map(() => '?').join(',');
+  const [items] = await pool.query(
+    `SELECT oi.order_id, oi.quantity, oi.unit_price, p.name AS product_name
+     FROM order_items oi
+     JOIN products p ON p.id = oi.product_id
+     WHERE oi.order_id IN (${placeholders})
+     ORDER BY oi.order_id, p.name`,
+    orderIds
+  );
+
+  const itemsByOrderId = items.reduce((acc, item) => {
+    if (!acc[item.order_id]) acc[item.order_id] = [];
+    acc[item.order_id].push({
+      product_name: item.product_name,
+      quantity: item.quantity,
+      unit_price: item.unit_price,
+    });
+    return acc;
+  }, {});
+
+  return rows.map((row) => ({
+    ...row,
+    items: itemsByOrderId[row.order_id] || [],
+  }));
+}
+
 /**
  * GET /api/deliveries
  * List deliveries: delivery staff sees assigned, admin sees all
@@ -24,10 +58,10 @@ router.get('/', authorize('admin', 'delivery'), async (req, res, next) => {
     let sql = `
       SELECT da.*, o.address, o.contact_phone, o.preferred_time, o.total_amount, o.payment_method,
              o.status as order_status, o.notes as order_notes, o.zone_id,
+             o.id as order_id,
              u.name as customer_name, u.phone as customer_phone,
              ds.name as staff_name, z.name as zone_name,
-             (SELECT JSON_ARRAYAGG(JSON_OBJECT('product_name', p.name, 'quantity', oi.quantity, 'unit_price', oi.unit_price))
-              FROM order_items oi JOIN products p ON oi.product_id = p.id WHERE oi.order_id = o.id) as items
+             da.status as delivery_status
       FROM delivery_assignments da
       JOIN orders o ON da.order_id = o.id
       JOIN users u ON o.customer_id = u.id
@@ -58,11 +92,7 @@ router.get('/', authorize('admin', 'delivery'), async (req, res, next) => {
     params.push(parseInt(limit), (parseInt(page) - 1) * parseInt(limit));
 
     const [deliveries] = await pool.query(sql, params);
-
-    const parsed = deliveries.map(d => ({
-      ...d,
-      items: typeof d.items === 'string' ? JSON.parse(d.items) : d.items,
-    }));
+    const parsed = await attachOrderItems(deliveries);
 
     res.json({ deliveries: parsed });
   } catch (err) {
@@ -77,9 +107,7 @@ router.get('/', authorize('admin', 'delivery'), async (req, res, next) => {
 router.get('/unassigned', authorize('admin', 'delivery'), async (req, res, next) => {
   try {
     const [orders] = await pool.query(`
-      SELECT o.*, u.name as customer_name, u.phone as customer_phone, z.name as zone_name,
-             (SELECT JSON_ARRAYAGG(JSON_OBJECT('product_name', p.name, 'quantity', oi.quantity, 'unit_price', oi.unit_price))
-              FROM order_items oi JOIN products p ON oi.product_id = p.id WHERE oi.order_id = o.id) as items
+      SELECT o.*, o.id as order_id, u.name as customer_name, u.phone as customer_phone, z.name as zone_name
       FROM orders o
       JOIN users u ON o.customer_id = u.id
       LEFT JOIN zones z ON o.zone_id = z.id
@@ -88,10 +116,7 @@ router.get('/unassigned', authorize('admin', 'delivery'), async (req, res, next)
       ORDER BY o.created_at ASC
     `);
 
-    const parsed = orders.map(o => ({
-      ...o,
-      items: typeof o.items === 'string' ? JSON.parse(o.items) : o.items,
-    }));
+    const parsed = await attachOrderItems(orders);
 
     res.json({ orders: parsed });
   } catch (err) {

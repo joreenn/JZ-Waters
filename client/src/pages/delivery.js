@@ -7,14 +7,13 @@ import StaffLayout from '../components/layout/StaffLayout';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import EmptyState from '../components/ui/EmptyState';
 import api from '../lib/api';
-import { connectSocket, getSocket } from '../lib/socket';
+import { getSocket } from '../lib/socket';
 import { useAuth } from '../contexts/AuthContext';
 import { Truck, MapPin, Clock, Package, CheckCircle, XCircle, Phone, Navigation } from 'lucide-react';
 import { formatCurrency, formatDateTime } from '../../../shared/helpers';
 import toast from 'react-hot-toast';
 
 export default function DeliveryDashboard() {
-  const { user } = useAuth();
   const [deliveries, setDeliveries] = useState([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState('active');
@@ -48,16 +47,15 @@ export default function DeliveryDashboard() {
     } catch (err) { toast.error(err.response?.data?.error || 'Failed'); }
   };
 
-  const active = deliveries.filter(d => !['delivered', 'failed'].includes(d.delivery_status));
-  const completed = deliveries.filter(d => ['delivered', 'failed'].includes(d.delivery_status));
+  const active = deliveries.filter(d => !['delivered', 'cancelled'].includes(d.delivery_status));
+  const completed = deliveries.filter(d => ['delivered', 'cancelled'].includes(d.delivery_status));
   const current = tab === 'active' ? active : completed;
 
   const statusConfig = {
-    assigned: { color: 'bg-yellow-100 text-yellow-700', next: 'picked_up', nextLabel: 'Pick Up' },
-    picked_up: { color: 'bg-blue-100 text-blue-700', next: 'in_transit', nextLabel: 'Start Delivery' },
-    in_transit: { color: 'bg-purple-100 text-purple-700', next: 'delivered', nextLabel: 'Mark Delivered' },
+    assigned: { color: 'bg-yellow-100 text-yellow-700', next: 'out_for_delivery', nextLabel: 'Start Delivery' },
+    out_for_delivery: { color: 'bg-blue-100 text-blue-700', next: 'delivered', nextLabel: 'Mark Delivered' },
     delivered: { color: 'bg-green-100 text-green-700' },
-    failed: { color: 'bg-red-100 text-red-700' },
+    cancelled: { color: 'bg-red-100 text-red-700' },
   };
 
   return (
@@ -82,8 +80,8 @@ export default function DeliveryDashboard() {
             <p className="text-sm text-gray-500">Delivered Today</p>
           </div>
           <div className="card text-center">
-            <p className="text-2xl font-bold text-red-600">{completed.filter(d => d.delivery_status === 'failed').length}</p>
-            <p className="text-sm text-gray-500">Failed</p>
+            <p className="text-2xl font-bold text-red-600">{completed.filter(d => d.delivery_status === 'cancelled').length}</p>
+            <p className="text-sm text-gray-500">Cancelled</p>
           </div>
         </div>
 
@@ -106,12 +104,16 @@ export default function DeliveryDashboard() {
           <div className="space-y-4">
             {current.map(d => {
               const config = statusConfig[d.delivery_status] || {};
+              const units = Array.isArray(d.items)
+                ? d.items.reduce((sum, item) => sum + (parseInt(item.quantity, 10) || 0), 0)
+                : 0;
+
               return (
                 <div key={d.id} className="card">
                   <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
                     <div className="flex-1">
                       <div className="flex items-center gap-3 mb-2">
-                        <h3 className="font-semibold text-primary-600">{d.order_number}</h3>
+                        <h3 className="font-semibold text-primary-600">Order #{d.order_id}</h3>
                         <span className={`badge ${config.color}`}>{d.delivery_status?.replace('_', ' ')}</span>
                       </div>
 
@@ -122,7 +124,7 @@ export default function DeliveryDashboard() {
                         </p>
                         <p className="flex items-center gap-2">
                           <MapPin className="w-4 h-4 text-gray-400" />
-                          <span>{d.delivery_address || 'No address'}</span>
+                          <span>{d.address || 'No address'}</span>
                         </p>
                         {d.customer_phone && (
                           <p className="flex items-center gap-2">
@@ -140,6 +142,20 @@ export default function DeliveryDashboard() {
                           <Clock className="w-4 h-4 text-gray-400" />
                           <span className="text-gray-400 text-xs">{formatDateTime(d.assigned_at)}</span>
                         </p>
+                        <p className="flex items-center gap-2">
+                          <Package className="w-4 h-4 text-gray-400" />
+                          <span className="text-gray-600">Units to deliver: <strong>{units}</strong></span>
+                        </p>
+                        {Array.isArray(d.items) && d.items.length > 0 && (
+                          <div className="pl-6 text-xs text-gray-500 space-y-1">
+                            {d.items.map((item, idx) => (
+                              <p key={`${d.id}-${idx}`}>{item.product_name} x {item.quantity}</p>
+                            ))}
+                          </div>
+                        )}
+                        {d.order_notes && (
+                          <p className="pl-6 text-sm text-gray-600"><strong>Special Request:</strong> {d.order_notes}</p>
+                        )}
                       </div>
 
                       <div className="mt-2 flex items-center gap-4 text-sm">
@@ -155,10 +171,10 @@ export default function DeliveryDashboard() {
                           className="btn-primary text-sm w-full">
                           {config.nextLabel}
                         </button>
-                        {d.delivery_status === 'in_transit' && (
-                          <button onClick={() => updateStatus(d.id, 'failed')}
+                        {d.delivery_status === 'out_for_delivery' && (
+                          <button onClick={() => updateStatus(d.id, 'cancelled')}
                             className="btn-danger text-sm w-full flex items-center justify-center gap-1">
-                            <XCircle className="w-4 h-4" /> Failed
+                            <XCircle className="w-4 h-4" /> Cancel Delivery
                           </button>
                         )}
                       </div>

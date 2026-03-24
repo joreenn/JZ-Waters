@@ -17,6 +17,14 @@ export default function Cart() {
   const { user } = useAuth();
   const router = useRouter();
 
+  useEffect(() => {
+    if (user?.role === 'delivery') {
+      router.replace('/delivery');
+    }
+  }, [user, router]);
+
+  if (user?.role === 'delivery') return null;
+
   return (
     <>
       <Head><title>Cart - JZ Waters</title></Head>

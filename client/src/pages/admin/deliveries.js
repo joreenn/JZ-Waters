@@ -43,7 +43,10 @@ export default function AdminDeliveries() {
   const handleAssign = async (e) => {
     e.preventDefault();
     try {
-      await api.post('/deliveries/assign', { order_id: assignOrder.id, driver_id: selectedDriver });
+      await api.post('/deliveries/assign', {
+        order_id: assignOrder.id,
+        delivery_staff_id: parseInt(selectedDriver, 10),
+      });
       toast.success('Delivery assigned');
       setAssignOpen(false);
       fetchData();
@@ -60,10 +63,9 @@ export default function AdminDeliveries() {
 
   const statusColors = {
     assigned: 'bg-yellow-100 text-yellow-700',
-    picked_up: 'bg-blue-100 text-blue-700',
-    in_transit: 'bg-purple-100 text-purple-700',
+    out_for_delivery: 'bg-blue-100 text-blue-700',
     delivered: 'bg-green-100 text-green-700',
-    failed: 'bg-red-100 text-red-700'
+    cancelled: 'bg-red-100 text-red-700'
   };
 
   return (
@@ -105,9 +107,9 @@ export default function AdminDeliveries() {
                   <tbody>
                     {deliveries.map(d => (
                       <tr key={d.id} className="border-b border-gray-50 hover:bg-gray-50">
-                        <td className="py-3 font-medium text-primary-600">{d.order_number}</td>
+                        <td className="py-3 font-medium text-primary-600">#{d.order_id}</td>
                         <td className="py-3">{d.customer_name}</td>
-                        <td className="py-3 flex items-center gap-1"><User className="w-3 h-3 text-gray-400" /> {d.driver_name}</td>
+                        <td className="py-3 flex items-center gap-1"><User className="w-3 h-3 text-gray-400" /> {d.staff_name || '-'}</td>
                         <td className="py-3 flex items-center gap-1"><MapPin className="w-3 h-3 text-gray-400" /> {d.zone_name || '-'}</td>
                         <td className="py-3">
                           <span className={`badge ${statusColors[d.delivery_status] || 'bg-gray-100 text-gray-700'}`}>{d.delivery_status?.replace('_', ' ')}</span>
@@ -115,15 +117,12 @@ export default function AdminDeliveries() {
                         <td className="py-3 text-gray-500 text-xs">{formatDateTime(d.assigned_at)}</td>
                         <td className="py-3">
                           {d.delivery_status === 'assigned' && (
-                            <button onClick={() => updateDeliveryStatus(d.id, 'picked_up')} className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded hover:bg-blue-200">Pick Up</button>
+                            <button onClick={() => updateDeliveryStatus(d.id, 'out_for_delivery')} className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded hover:bg-blue-200">Start Delivery</button>
                           )}
-                          {d.delivery_status === 'picked_up' && (
-                            <button onClick={() => updateDeliveryStatus(d.id, 'in_transit')} className="text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded hover:bg-purple-200">In Transit</button>
-                          )}
-                          {d.delivery_status === 'in_transit' && (
+                          {d.delivery_status === 'out_for_delivery' && (
                             <div className="flex gap-1">
                               <button onClick={() => updateDeliveryStatus(d.id, 'delivered')} className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded hover:bg-green-200">Delivered</button>
-                              <button onClick={() => updateDeliveryStatus(d.id, 'failed')} className="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded hover:bg-red-200">Failed</button>
+                              <button onClick={() => updateDeliveryStatus(d.id, 'cancelled')} className="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded hover:bg-red-200">Cancel</button>
                             </div>
                           )}
                         </td>
@@ -147,13 +146,13 @@ export default function AdminDeliveries() {
                   <div key={o.id} className="card">
                     <div className="flex justify-between items-start">
                       <div>
-                        <h3 className="font-semibold text-primary-600">{o.order_number}</h3>
+                        <h3 className="font-semibold text-primary-600">Order #{o.id}</h3>
                         <p className="text-sm text-gray-500">{o.customer_name}</p>
                       </div>
                       <StatusBadge status={o.status} />
                     </div>
                     <div className="mt-3 text-sm space-y-1">
-                      <p className="flex items-center gap-1"><MapPin className="w-3 h-3 text-gray-400" /> {o.delivery_address}</p>
+                      <p className="flex items-center gap-1"><MapPin className="w-3 h-3 text-gray-400" /> {o.address || '-'}</p>
                       <p className="flex items-center gap-1"><Clock className="w-3 h-3 text-gray-400" /> {formatDateTime(o.created_at)}</p>
                       <p className="font-medium">{formatCurrency(o.total_amount)}</p>
                     </div>
@@ -173,10 +172,10 @@ export default function AdminDeliveries() {
       <Modal isOpen={assignOpen} onClose={() => setAssignOpen(false)} title="Assign Delivery Driver">
         <form onSubmit={handleAssign} className="space-y-4">
           <p className="text-sm text-gray-500">
-            Assign a driver for <strong>{assignOrder?.order_number}</strong> — {assignOrder?.customer_name}
+            Assign a driver for <strong>Order #{assignOrder?.id}</strong> — {assignOrder?.customer_name}
           </p>
           <div className="text-sm text-gray-500 flex items-center gap-1">
-            <MapPin className="w-3 h-3" /> {assignOrder?.delivery_address}
+            <MapPin className="w-3 h-3" /> {assignOrder?.address || '-'}
           </div>
           <select value={selectedDriver} onChange={e => setSelectedDriver(e.target.value)} className="input-field" required>
             <option value="">Select Driver</option>

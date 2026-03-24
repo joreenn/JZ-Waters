@@ -3,10 +3,12 @@
  */
 import { useState, useEffect } from 'react';
 import Head from 'next/head';
+import { useRouter } from 'next/router';
 import Navbar from '../components/layout/Navbar';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import EmptyState from '../components/ui/EmptyState';
 import { useCart } from '../contexts/CartContext';
+import { useAuth } from '../contexts/AuthContext';
 import api from '../lib/api';
 import { ShoppingCart, Plus, Minus, Package } from 'lucide-react';
 import { formatCurrency } from '../../../shared/helpers';
@@ -19,7 +21,15 @@ export default function Products() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [category, setCategory] = useState('All');
+  const router = useRouter();
+  const { user } = useAuth();
   const { addItem, items } = useCart();
+
+  useEffect(() => {
+    if (user?.role === 'delivery') {
+      router.replace('/delivery');
+    }
+  }, [user, router]);
 
   useEffect(() => {
     const fetchProducts = async () => {
@@ -39,6 +49,8 @@ export default function Products() {
     const item = items.find(i => i.product_id === productId);
     return item ? item.quantity : 0;
   };
+
+  if (user?.role === 'delivery') return null;
 
   return (
     <>

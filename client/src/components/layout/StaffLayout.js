@@ -6,17 +6,18 @@ import { useRouter } from 'next/router';
 import { useAuth } from '../../contexts/AuthContext';
 import Navbar from './Navbar';
 
-export default function StaffLayout({ children, allowedRoles = [] }) {
+export default function StaffLayout({ children, allowedRoles = [], role }) {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const resolvedRoles = allowedRoles.length ? allowedRoles : (role ? [role] : []);
 
   useEffect(() => {
-    if (!loading && (!user || !allowedRoles.includes(user.role))) {
+    if (!loading && (!user || !resolvedRoles.includes(user.role))) {
       router.push('/login');
     }
-  }, [user, loading, router, allowedRoles]);
+  }, [user, loading, router, resolvedRoles]);
 
-  if (loading || !user || !allowedRoles.includes(user.role)) {
+  if (loading || !user || !resolvedRoles.includes(user.role)) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>

@@ -16,6 +16,8 @@ export default function Navbar() {
   const { user, logout } = useAuth();
   const { totalItems } = useCart();
   const router = useRouter();
+  const isCustomer = user?.role === 'customer';
+  const canUseStorefront = !user || isCustomer;
   const [mobileOpen, setMobileOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -58,9 +60,11 @@ export default function Navbar() {
                 Home
               </Link>
             )}
-            <Link href="/products" className={`text-sm font-medium ${router.pathname === '/products' ? 'text-primary-600' : 'text-gray-600 hover:text-primary-600'}`}>
-              Products
-            </Link>
+            {canUseStorefront && (
+              <Link href="/products" className={`text-sm font-medium ${router.pathname === '/products' ? 'text-primary-600' : 'text-gray-600 hover:text-primary-600'}`}>
+                Products
+              </Link>
+            )}
             {user && (
               <Link href={getDashboardLink()} className="text-sm font-medium text-gray-600 hover:text-primary-600">
                 {user.role === 'customer' ? 'Purchase History' : 'Dashboard'}
@@ -71,14 +75,16 @@ export default function Navbar() {
           {/* Right side */}
           <div className="flex items-center space-x-3">
             {/* Cart */}
-            <Link href="/cart" className="relative p-2 text-gray-600 hover:text-primary-600">
-              <ShoppingCart className="w-5 h-5" />
-              {totalItems > 0 && (
-                <span className="absolute -top-1 -right-1 bg-primary-600 text-white text-xs w-5 h-5 flex items-center justify-center rounded-full">
-                  {totalItems}
-                </span>
-              )}
-            </Link>
+            {canUseStorefront && (
+              <Link href="/cart" className="relative p-2 text-gray-600 hover:text-primary-600">
+                <ShoppingCart className="w-5 h-5" />
+                {totalItems > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-primary-600 text-white text-xs w-5 h-5 flex items-center justify-center rounded-full">
+                    {totalItems}
+                  </span>
+                )}
+              </Link>
+            )}
 
             {user ? (
               <>
@@ -161,7 +167,9 @@ export default function Navbar() {
             {!user && (
               <Link href="/" className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded" onClick={() => setMobileOpen(false)}>Home</Link>
             )}
-            <Link href="/products" className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded" onClick={() => setMobileOpen(false)}>Products</Link>
+            {canUseStorefront && (
+              <Link href="/products" className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded" onClick={() => setMobileOpen(false)}>Products</Link>
+            )}
             {user && (
               <Link href={getDashboardLink()} className="block px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded" onClick={() => setMobileOpen(false)}>{user.role === 'customer' ? 'Purchase History' : 'Dashboard'}</Link>
             )}
