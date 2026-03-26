@@ -5,15 +5,10 @@ import { useEffect, useState } from 'react';
 import Head from 'next/head';
 import AdminLayout from '../../components/layout/AdminLayout';
 import api from '../../lib/api';
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  LineChart, Line, PieChart, Pie, Cell
-} from 'recharts';
-import { FileText, Download, Calendar, TrendingUp, Box, Receipt, Sparkles } from 'lucide-react';
+import { FileText, Download, TrendingUp } from 'lucide-react';
 import { formatCurrency } from '../../../../shared/helpers';
 import toast from 'react-hot-toast';
 
-const PIE_COLORS = ['#0ea5e9', '#22c55e'];
 const EMPTY_REPORT = {
   summary: {
     total_revenue: 0,
@@ -37,6 +32,10 @@ const EMPTY_REPORT = {
 export default function AdminReports() {
   const [loading, setLoading] = useState(false);
   const [report, setReport] = useState(EMPTY_REPORT);
+  const [salesView, setSalesView] = useState('daily');
+  const [salesPage, setSalesPage] = useState(1);
+  const [productView, setProductView] = useState('most_bought');
+  const [productPage, setProductPage] = useState(1);
   const [dateRange, setDateRange] = useState({
     start_date: new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0],
     end_date: new Date().toISOString().split('T')[0]
@@ -94,12 +93,106 @@ export default function AdminReports() {
   const monthlyData = report?.trends?.monthly || [];
   const topProducts = report?.top_products || [];
   const summary = report?.summary || {};
-  const insights = report?.insights || {};
+  const SALES_PAGE_SIZE = 6;
+  const PRODUCT_PAGE_SIZE = 6;
 
-  const revenueSplit = [
-    { name: 'Delivery', value: Number(summary.delivery_revenue || 0) },
-    { name: 'Refill', value: Number(summary.refill_revenue || 0) },
-  ].filter((item) => item.value > 0);
+  const salesSeriesMap = {
+    daily: dailyData,
+    weekly: weeklyData,
+    monthly: monthlyData,
+  };
+
+  const combineByPeriod = (rows) => {
+    const grouped = rows.reduce((acc, row) => {
+      const key = String(row?.period || '').trim();
+      if (!key) return acc;
+
+      if (!acc[key]) {
+        acc[key] = {
+          period: key,
+          delivery_revenue: 0,
+          refill_revenue: 0,
+          total_revenue: 0,
+        };
+      }
+
+      acc[key].delivery_revenue += Number(row?.delivery_revenue || 0);
+      acc[key].refill_revenue += Number(row?.refill_revenue || 0);
+      acc[key].total_revenue += Number(row?.total_revenue || 0);
+      return acc;
+    }, {});
+
+    return Object.values(grouped);
+  };
+
+  const getPeriodSortValue = (period) => {
+    if (!period) return 0;
+    const asDate = new Date(period);
+    if (!Number.isNaN(asDate.getTime())) return asDate.getTime();
+
+    const normalized = String(period).trim();
+    const monthYear = new Date(`${normalized} 01`);
+    if (!Number.isNaN(monthYear.getTime())) return monthYear.getTime();
+
+    return 0;
+  };
+
+  const activeSalesData = combineByPeriod(salesSeriesMap[salesView] || []).sort((a, b) => {
+    const diff = getPeriodSortValue(b.period) - getPeriodSortValue(a.period);
+    if (diff !== 0) return diff;
+
+    return Number(b.total_revenue || 0) - Number(a.total_revenue || 0);
+  });
+  const totalSalesPages = Math.max(1, Math.ceil(activeSalesData.length / SALES_PAGE_SIZE));
+  const safeSalesPage = Math.min(salesPage, totalSalesPages);
+  const salesStart = (safeSalesPage - 1) * SALES_PAGE_SIZE;
+  const pagedSalesData = activeSalesData.slice(salesStart, salesStart + SALES_PAGE_SIZE);
+
+  const formatPeriodLabel = (period) => {
+    if (!period) return 'N/A';
+    const dt = new Date(period);
+    if (!Number.isNaN(dt.getTime())) {
+      if (salesView === 'daily') {
+        return dt.toLocaleDateString('en-PH', { month: 'short', day: '2-digit', year: 'numeric' });
+      }
+      if (salesView === 'monthly') {
+        return dt.toLocaleDateString('en-PH', { month: 'long', year: 'numeric' });
+      }
+    }
+    return String(period).replace('T00:00:00.000Z', '');
+  };
+
+  const openSalesPage = (page) => {
+    if (page < 1 || page > totalSalesPages) return;
+    setSalesPage(page);
+  };
+
+  const productsByQty = [...topProducts].sort((a, b) => Number(b.total_quantity || 0) - Number(a.total_quantity || 0));
+  const productsByRevenue = [...topProducts].sort((a, b) => Number(b.total_revenue || 0) - Number(a.total_revenue || 0));
+  const activeProductData = productView === 'most_bought' ? productsByQty : productsByRevenue;
+  const totalProductPages = Math.max(1, Math.ceil(activeProductData.length / PRODUCT_PAGE_SIZE));
+  const safeProductPage = Math.min(productPage, totalProductPages);
+  const productStart = (safeProductPage - 1) * PRODUCT_PAGE_SIZE;
+  const pagedProducts = activeProductData.slice(productStart, productStart + PRODUCT_PAGE_SIZE);
+
+  const openProductPage = (page) => {
+    if (page < 1 || page > totalProductPages) return;
+    setProductPage(page);
+  };
+
+  useEffect(() => {
+    setSalesPage(1);
+  }, [salesView, report]);
+
+  useEffect(() => {
+    setProductPage(1);
+  }, [productView, report]);
+
+  const deliveryRevenue = Number(summary.delivery_revenue || 0);
+  const refillRevenue = Number(summary.refill_revenue || 0);
+  const splitTotal = deliveryRevenue + refillRevenue;
+  const deliveryPercent = splitTotal > 0 ? (deliveryRevenue / splitTotal) * 100 : 0;
+  const refillPercent = splitTotal > 0 ? (refillRevenue / splitTotal) * 100 : 0;
 
   return (
     <AdminLayout title="Reports & Analytics">
@@ -134,144 +227,235 @@ export default function AdminReports() {
       </div>
 
       <div className="space-y-6">
-          {/* Summary Cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-            <div className="card text-center">
-              <p className="text-sm text-gray-500">Total Revenue</p>
-              <p className="text-2xl font-bold text-primary-600">{formatCurrency(summary.total_revenue || 0)}</p>
+        <section className="rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-50 via-white to-sky-50 p-5">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+            <div className="rounded-xl border border-slate-200 bg-white/80 px-4 py-3">
+              <p className="text-xs text-slate-500 uppercase tracking-wide">Total Revenue</p>
+              <p className="mt-1 text-2xl font-bold text-slate-900">{formatCurrency(summary.total_revenue || 0)}</p>
             </div>
-            <div className="card text-center">
-              <p className="text-sm text-gray-500">Total Transactions</p>
-              <p className="text-2xl font-bold text-gray-900">{summary.total_transactions || 0}</p>
+            <div className="rounded-xl border border-slate-200 bg-white/80 px-4 py-3">
+              <p className="text-xs text-slate-500 uppercase tracking-wide">Transactions</p>
+              <p className="mt-1 text-2xl font-bold text-slate-900">{summary.total_transactions || 0}</p>
             </div>
-            <div className="card text-center">
-              <p className="text-sm text-gray-500">Avg Order Value</p>
-              <p className="text-2xl font-bold text-gray-900">{formatCurrency(summary.average_order_value || 0)}</p>
+            <div className="rounded-xl border border-slate-200 bg-white/80 px-4 py-3">
+              <p className="text-xs text-slate-500 uppercase tracking-wide">Avg Order Value</p>
+              <p className="mt-1 text-2xl font-bold text-slate-900">{formatCurrency(summary.average_order_value || 0)}</p>
             </div>
-            <div className="card text-center">
-              <p className="text-sm text-gray-500">Most Bought Product</p>
-              <p className="text-sm font-bold text-blue-600 truncate">{summary.top_product_name || 'No data yet'}</p>
+            <div className="rounded-xl border border-slate-200 bg-white/80 px-4 py-3">
+              <p className="text-xs text-slate-500 uppercase tracking-wide">Most Bought Product</p>
+              <p className="mt-1 text-sm font-semibold text-sky-700 truncate">{summary.top_product_name || 'No data yet'}</p>
             </div>
-            <div className="card text-center">
-              <p className="text-sm text-gray-500">Total Sales Sources</p>
-              <p className="text-2xl font-bold text-emerald-600">{summary.refill_transactions || 0} / {summary.delivery_transactions || 0}</p>
-              <p className="text-xs text-gray-500">Refills / Deliveries</p>
-            </div>
-          </div>
-
-          {/* Daily + Split */}
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-            <div className="card xl:col-span-2">
-              <h3 className="text-lg font-semibold mb-4">Daily Sales Trend</h3>
-              <ResponsiveContainer width="100%" height={320}>
-                <LineChart data={dailyData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="period" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 12 }} />
-                  <Tooltip formatter={(val) => formatCurrency(val)} />
-                  <Legend />
-                  <Line type="monotone" dataKey="delivery_revenue" name="Delivery" stroke="#0ea5e9" strokeWidth={2.5} dot={false} />
-                  <Line type="monotone" dataKey="refill_revenue" name="Refill" stroke="#22c55e" strokeWidth={2.5} dot={false} />
-                  <Line type="monotone" dataKey="total_revenue" name="Total" stroke="#1f2937" strokeWidth={2} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-
-            <div className="card">
-              <h3 className="text-lg font-semibold mb-4">Revenue Composition</h3>
-              {revenueSplit.length > 0 ? (
-                <ResponsiveContainer width="100%" height={320}>
-                  <PieChart>
-                    <Pie data={revenueSplit} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={92} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}>
-                      {revenueSplit.map((entry, idx) => <Cell key={entry.name} fill={PIE_COLORS[idx % PIE_COLORS.length]} />)}
-                    </Pie>
-                    <Tooltip formatter={(v) => formatCurrency(v)} />
-                  </PieChart>
-                </ResponsiveContainer>
-              ) : (
-                <p className="text-sm text-gray-400 py-12 text-center">No revenue split data yet</p>
-              )}
+            <div className="rounded-xl border border-slate-200 bg-white/80 px-4 py-3">
+              <p className="text-xs text-slate-500 uppercase tracking-wide">Sales Sources</p>
+              <p className="mt-1 text-2xl font-bold text-emerald-700">{summary.refill_transactions || 0} / {summary.delivery_transactions || 0}</p>
+              <p className="text-xs text-slate-500">Refills / Deliveries</p>
             </div>
           </div>
+        </section>
 
-          {/* Weekly + Monthly */}
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-            <div className="card">
-              <h3 className="text-lg font-semibold mb-4">Weekly Sales</h3>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={weeklyData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="period" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 11 }} />
-                  <Tooltip formatter={(v) => formatCurrency(v)} />
-                  <Legend />
-                  <Bar dataKey="delivery_revenue" name="Delivery" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="refill_revenue" name="Refill" fill="#22c55e" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+          <section className="card xl:col-span-2">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+              <h3 className="text-lg font-semibold">Sales History</h3>
+              <div className="inline-flex bg-slate-100 p-1 rounded-lg">
+                {['daily', 'weekly', 'monthly'].map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => setSalesView(mode)}
+                    className={`px-3 py-1.5 text-sm rounded-md capitalize transition ${
+                      salesView === mode ? 'bg-white shadow-sm text-primary-700 font-semibold' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {mode}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <div className="card">
-              <h3 className="text-lg font-semibold mb-4">Monthly Sales</h3>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={monthlyData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="period" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 11 }} />
-                  <Tooltip formatter={(v) => formatCurrency(v)} />
-                  <Legend />
-                  <Bar dataKey="delivery_revenue" name="Delivery" fill="#0369a1" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="refill_revenue" name="Refill" fill="#15803d" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
+            <div className="border border-slate-200 rounded-xl overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-100 text-slate-700">
+                    <tr>
+                      <th className="text-left px-4 py-3 font-semibold">Period</th>
+                      <th className="text-right px-4 py-3 font-semibold">Delivery</th>
+                      <th className="text-right px-4 py-3 font-semibold">Refill</th>
+                      <th className="text-right px-4 py-3 font-semibold">Total Revenue</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 bg-white">
+                    {pagedSalesData.length > 0 ? (
+                      pagedSalesData.map((row, idx) => (
+                        <tr key={`${row.period}-${idx}`} className="hover:bg-slate-50">
+                          <td className="px-4 py-3 text-slate-800 font-medium">{formatPeriodLabel(row.period)}</td>
+                          <td className="px-4 py-3 text-right text-sky-600 font-semibold">{formatCurrency(row.delivery_revenue || 0)}</td>
+                          <td className="px-4 py-3 text-right text-emerald-600 font-semibold">{formatCurrency(row.refill_revenue || 0)}</td>
+                          <td className="px-4 py-3 text-right text-slate-900 font-bold">{formatCurrency(row.total_revenue || 0)}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={4} className="px-4 py-10 text-center text-slate-400">No {salesView} sales data in this range.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
 
-          {/* Top Products + Insights */}
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-            <div className="card xl:col-span-2">
-              <h3 className="text-lg font-semibold mb-4">Most Products Bought</h3>
-              {topProducts.length > 0 ? (
-                <ResponsiveContainer width="100%" height={320}>
-                  <BarChart data={topProducts.slice(0, 8)} layout="vertical" margin={{ left: 40 }}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis type="number" tick={{ fontSize: 11 }} />
-                    <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={150} />
-                    <Tooltip formatter={(value, name) => name === 'total_revenue' ? formatCurrency(value) : value} />
-                    <Legend />
-                    <Bar dataKey="total_quantity" name="Quantity" fill="#f59e0b" radius={[0, 4, 4, 0]} />
-                    <Bar dataKey="total_revenue" name="Revenue" fill="#7c3aed" radius={[0, 4, 4, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <p className="text-sm text-gray-400 py-14 text-center">No product sales found in this range.</p>
-              )}
+              <div className="px-4 py-3 border-t border-slate-200 bg-slate-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <p className="text-xs text-slate-500">Showing {pagedSalesData.length ? salesStart + 1 : 0}-{salesStart + pagedSalesData.length} of {activeSalesData.length}</p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => openSalesPage(safeSalesPage - 1)}
+                    disabled={safeSalesPage === 1}
+                    className="px-3 py-1.5 text-sm rounded-md border border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-white"
+                  >
+                    Prev
+                  </button>
+                  {Array.from({ length: totalSalesPages }, (_, i) => i + 1).slice(Math.max(0, safeSalesPage - 3), Math.max(0, safeSalesPage - 3) + 5).map((page) => (
+                    <button
+                      key={page}
+                      onClick={() => openSalesPage(page)}
+                      className={`px-3 py-1.5 text-sm rounded-md border ${
+                        page === safeSalesPage
+                          ? 'bg-primary-600 border-primary-600 text-white'
+                          : 'border-slate-300 text-slate-700 hover:bg-white'
+                      }`}
+                    >
+                      {page}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => openSalesPage(safeSalesPage + 1)}
+                    disabled={safeSalesPage === totalSalesPages}
+                    className="px-3 py-1.5 text-sm rounded-md border border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-white"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
             </div>
+          </section>
 
+          <section className="card">
+            <h3 className="text-lg font-semibold mb-4">Revenue Split</h3>
             <div className="space-y-4">
-              <div className="card">
-                <p className="text-xs uppercase tracking-wide text-gray-500 flex items-center gap-2"><Sparkles className="w-4 h-4 text-indigo-500" /> Best Day</p>
-                <p className="mt-2 text-lg font-semibold text-gray-900">{insights.best_day?.period || 'No data'}</p>
-                <p className="text-sm text-gray-600">{formatCurrency(insights.best_day?.total_revenue || 0)}</p>
+              <div>
+                <div className="flex justify-between text-sm mb-1">
+                  <span className="text-slate-600 font-medium">Delivery</span>
+                  <span className="text-sky-700 font-semibold">{deliveryPercent.toFixed(1)}%</span>
+                </div>
+                <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-sky-500" style={{ width: `${deliveryPercent}%` }} />
+                </div>
+                <p className="mt-1 text-xs text-slate-500">{formatCurrency(deliveryRevenue)}</p>
               </div>
-              <div className="card">
-                <p className="text-xs uppercase tracking-wide text-gray-500 flex items-center gap-2"><Calendar className="w-4 h-4 text-blue-500" /> Best Week</p>
-                <p className="mt-2 text-lg font-semibold text-gray-900">{insights.best_week?.period || 'No data'}</p>
-                <p className="text-sm text-gray-600">{formatCurrency(insights.best_week?.total_revenue || 0)}</p>
+              <div>
+                <div className="flex justify-between text-sm mb-1">
+                  <span className="text-slate-600 font-medium">Refill</span>
+                  <span className="text-emerald-700 font-semibold">{refillPercent.toFixed(1)}%</span>
+                </div>
+                <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                  <div className="h-full bg-emerald-500" style={{ width: `${refillPercent}%` }} />
+                </div>
+                <p className="mt-1 text-xs text-slate-500">{formatCurrency(refillRevenue)}</p>
               </div>
-              <div className="card">
-                <p className="text-xs uppercase tracking-wide text-gray-500 flex items-center gap-2"><Receipt className="w-4 h-4 text-emerald-500" /> Best Month</p>
-                <p className="mt-2 text-lg font-semibold text-gray-900">{insights.best_month?.period || 'No data'}</p>
-                <p className="text-sm text-gray-600">{formatCurrency(insights.best_month?.total_revenue || 0)}</p>
+              <div className="pt-3 border-t border-slate-200">
+                <p className="text-xs text-slate-500">Combined Revenue</p>
+                <p className="text-xl font-bold text-slate-900">{formatCurrency(splitTotal)}</p>
               </div>
-              <div className="card">
-                <p className="text-xs uppercase tracking-wide text-gray-500 flex items-center gap-2"><Box className="w-4 h-4 text-amber-500" /> Top Product Revenue</p>
-                <p className="mt-2 text-lg font-semibold text-gray-900">{topProducts[0]?.name || 'No data'}</p>
-                <p className="text-sm text-gray-600">{formatCurrency(topProducts[0]?.total_revenue || 0)}</p>
+            </div>
+          </section>
+        </div>
+
+        <section className="card">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+            <h3 className="text-lg font-semibold">Product Performance</h3>
+            <div className="inline-flex bg-slate-100 p-1 rounded-lg">
+              <button
+                onClick={() => setProductView('most_bought')}
+                className={`px-3 py-1.5 text-sm rounded-md transition ${
+                  productView === 'most_bought' ? 'bg-white shadow-sm text-primary-700 font-semibold' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Most Products Bought
+              </button>
+              <button
+                onClick={() => setProductView('top_revenue')}
+                className={`px-3 py-1.5 text-sm rounded-md transition ${
+                  productView === 'top_revenue' ? 'bg-white shadow-sm text-primary-700 font-semibold' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Top Product Revenue
+              </button>
+            </div>
+          </div>
+
+          <div className="border border-slate-200 rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-100 text-slate-700">
+                  <tr>
+                    <th className="text-left px-4 py-3 font-semibold w-16">#</th>
+                    <th className="text-left px-4 py-3 font-semibold">Product</th>
+                    <th className="text-right px-4 py-3 font-semibold">Total Quantity</th>
+                    <th className="text-right px-4 py-3 font-semibold">Total Revenue</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 bg-white">
+                  {pagedProducts.length > 0 ? (
+                    pagedProducts.map((item, idx) => (
+                      <tr key={`${item.name}-${idx}`} className="hover:bg-slate-50">
+                        <td className="px-4 py-3 text-slate-500">{productStart + idx + 1}</td>
+                        <td className="px-4 py-3 text-slate-900 font-medium">{item.name}</td>
+                        <td className="px-4 py-3 text-right text-amber-700 font-semibold">{Number(item.total_quantity || 0)}</td>
+                        <td className="px-4 py-3 text-right text-violet-700 font-semibold">{formatCurrency(item.total_revenue || 0)}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-10 text-center text-slate-400">No product sales found in this range.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="px-4 py-3 border-t border-slate-200 bg-slate-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <p className="text-xs text-slate-500">Showing {pagedProducts.length ? productStart + 1 : 0}-{productStart + pagedProducts.length} of {activeProductData.length}</p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => openProductPage(safeProductPage - 1)}
+                  disabled={safeProductPage === 1}
+                  className="px-3 py-1.5 text-sm rounded-md border border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-white"
+                >
+                  Prev
+                </button>
+                {Array.from({ length: totalProductPages }, (_, i) => i + 1).slice(Math.max(0, safeProductPage - 3), Math.max(0, safeProductPage - 3) + 5).map((page) => (
+                  <button
+                    key={page}
+                    onClick={() => openProductPage(page)}
+                    className={`px-3 py-1.5 text-sm rounded-md border ${
+                      page === safeProductPage
+                        ? 'bg-primary-600 border-primary-600 text-white'
+                        : 'border-slate-300 text-slate-700 hover:bg-white'
+                    }`}
+                  >
+                    {page}
+                  </button>
+                ))}
+                <button
+                  onClick={() => openProductPage(safeProductPage + 1)}
+                  disabled={safeProductPage === totalProductPages}
+                  className="px-3 py-1.5 text-sm rounded-md border border-slate-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-white"
+                >
+                  Next
+                </button>
               </div>
             </div>
           </div>
-        </div>
+        </section>
+      </div>
     </AdminLayout>
   );
 }

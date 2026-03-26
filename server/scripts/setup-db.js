@@ -72,7 +72,7 @@ async function setupDatabase() {
       stock_quantity INT NOT NULL DEFAULT 0,
       unit VARCHAR(50) DEFAULT 'gallon',
       low_stock_threshold INT DEFAULT 10,
-      image_url VARCHAR(500),
+      image_url LONGTEXT,
       is_active TINYINT(1) DEFAULT 1,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -246,6 +246,7 @@ async function setupDatabase() {
   await connection.query(
     `ALTER TABLE products MODIFY COLUMN category ENUM('Water Products', 'Containers', 'Accessories') NOT NULL`
   );
+  await connection.query('ALTER TABLE products MODIFY COLUMN image_url LONGTEXT NULL');
 
   console.log('✅ All tables created successfully');
 

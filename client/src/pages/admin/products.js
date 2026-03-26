@@ -12,6 +12,8 @@ import { Plus, Search, Package, Edit, Trash2, ArrowUpDown } from 'lucide-react';
 import { formatCurrency } from '../../../../shared/helpers';
 import toast from 'react-hot-toast';
 
+const PLACEHOLDER_IMAGE = 'https://placehold.co/600x400/e2e8f0/475569?text=JZ+Waters';
+
 export default function AdminProducts() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -20,7 +22,17 @@ export default function AdminProducts() {
   const [editProduct, setEditProduct] = useState(null);
   const [stockModal, setStockModal] = useState(false);
   const [stockProduct, setStockProduct] = useState(null);
-  const [stockAdj, setStockAdj] = useState({ type: 'add', quantity: 0, reason: '' });
+  const [stockAdj, setStockAdj] = useState({ type: 'add', quantity: '', reason: '', customReason: '' });
+  const [showCustomReason, setShowCustomReason] = useState(false);
+
+  const reasonOptions = [
+    { value: 'restock', label: 'Restock/Purchase' },
+    { value: 'breakage', label: 'Breakage/Damaged' },
+    { value: 'spoilage', label: 'Loss/Spoilage' },
+    { value: 'counting_error', label: 'Counting Error' },
+    { value: 'customer_return', label: 'Return from Customer' },
+    { value: 'other', label: 'Others' },
+  ];
   const [form, setForm] = useState({
     name: '', description: '', category: 'Water Products', image_url: '',
     price: '', stock_quantity: '', low_stock_threshold: 10, is_active: true
@@ -74,6 +86,23 @@ export default function AdminProducts() {
 
   const handleStockAdj = async (e) => {
     e.preventDefault();
+    
+    // Validate quantity is not empty
+    if (!stockAdj.quantity || parseInt(stockAdj.quantity) <= 0) {
+      toast.error('Please enter a valid quantity');
+      return;
+    }
+
+    // Determine final reason
+    let finalReason = stockAdj.reason;
+    if (stockAdj.reason === 'other') {
+      if (!stockAdj.customReason.trim()) {
+        toast.error('Please specify the reason for this adjustment');
+        return;
+      }
+      finalReason = stockAdj.customReason;
+    }
+
     try {
       const change = stockAdj.type === 'subtract'
         ? -Math.abs(parseInt(stockAdj.quantity) || 0)
@@ -81,10 +110,12 @@ export default function AdminProducts() {
 
       await api.put(`/products/${stockProduct.id}/stock`, {
         change_quantity: change,
-        reason: stockAdj.reason,
+        reason: finalReason,
       });
-      toast.success('Stock adjusted');
+      toast.success('Stock adjusted successfully');
       setStockModal(false);
+      setStockAdj({ type: 'add', quantity: '', reason: '', customReason: '' });
+      setShowCustomReason(false);
       fetchProducts();
     } catch (err) { toast.error(err.response?.data?.error || 'Failed'); }
   };
@@ -147,9 +178,12 @@ export default function AdminProducts() {
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {filtered.map(p => (
             <div key={p.id} className={`card border-l-4 ${p.stock_quantity <= p.low_stock_threshold ? 'border-l-red-400' : 'border-l-green-400'}`}>
-              {p.image_url && (
-                <img src={p.image_url} alt={p.name} className="w-full h-36 object-cover rounded-lg mb-3" />
-              )}
+              <img
+                src={p.image_url || PLACEHOLDER_IMAGE}
+                alt={p.name}
+                className="w-full h-36 object-cover rounded-lg mb-3"
+                onError={(e) => { e.currentTarget.src = PLACEHOLDER_IMAGE; }}
+              />
               <div className="flex justify-between items-start">
                 <div>
                   <h3 className="font-semibold text-gray-900">{p.name}</h3>
@@ -170,7 +204,12 @@ export default function AdminProducts() {
               </div>
               {p.description && <p className="text-xs text-gray-400 mt-2 line-clamp-2">{p.description}</p>}
               <div className="flex justify-end gap-2 mt-3 pt-3 border-t">
-                <button onClick={() => { setStockProduct(p); setStockAdj({ type: 'add', quantity: 0, reason: '' }); setStockModal(true); }}
+                <button onClick={() => { 
+                  setStockProduct(p); 
+                  setStockAdj({ type: 'add', quantity: '', reason: '', customReason: '' }); 
+                  setShowCustomReason(false);
+                  setStockModal(true); 
+                }}
                   className="text-xs px-2 py-1 rounded border hover:bg-gray-50 flex items-center gap-1">
                   <ArrowUpDown className="w-3 h-3" /> Stock
                 </button>
@@ -217,7 +256,12 @@ export default function AdminProducts() {
             </div>
           </div>
           {form.image_url && (
-            <img src={form.image_url} alt="Preview" className="w-full h-40 object-cover rounded-lg border border-gray-200" />
+            <img
+              src={form.image_url}
+              alt="Preview"
+              className="w-full h-40 object-cover rounded-lg border border-gray-200"
+              onError={(e) => { e.currentTarget.src = PLACEHOLDER_IMAGE; }}
+            />
           )}
           <div className="grid grid-cols-3 gap-3">
             <div>
@@ -245,29 +289,93 @@ export default function AdminProducts() {
       </Modal>
 
       {/* Stock Adjustment Modal */}
-      <Modal isOpen={stockModal} onClose={() => setStockModal(false)} title={`Adjust Stock - ${stockProduct?.name || ''}`}>
-        <form onSubmit={handleStockAdj} className="space-y-4">
-          <p className="text-sm text-gray-500">Current stock: <strong>{stockProduct?.stock_quantity}</strong></p>
-          <div className="grid grid-cols-2 gap-3">
+      <Modal isOpen={stockModal} onClose={() => { setStockModal(false); setShowCustomReason(false); }} title={`Adjust Stock - ${stockProduct?.name || ''}`}>
+        <form onSubmit={handleStockAdj} className="space-y-5">
+          {/* Current Stock Display */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <p className="text-sm text-gray-600">Current Stock Level</p>
+            <p className="text-2xl font-bold text-blue-600">{stockProduct?.stock_quantity} units</p>
+          </div>
+
+          {/* Type and Quantity Row */}
+          <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-              <select value={stockAdj.type} onChange={e => setStockAdj({ ...stockAdj, type: e.target.value })} className="input-field">
-                <option value="add">Add</option>
-                <option value="subtract">Subtract</option>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Adjustment Type</label>
+              <select 
+                value={stockAdj.type} 
+                onChange={e => setStockAdj({ ...stockAdj, type: e.target.value })} 
+                className="input-field font-medium"
+              >
+                <option value="add">➕ Add Stock</option>
+                <option value="subtract">➖ Reduce Stock</option>
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
-              <input type="number" min="1" value={stockAdj.quantity} onChange={e => setStockAdj({ ...stockAdj, quantity: parseInt(e.target.value) || 0 })} className="input-field" required />
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Quantity *</label>
+              <input 
+                type="number" 
+                min="1" 
+                placeholder="Enter quantity"
+                value={stockAdj.quantity} 
+                onChange={e => setStockAdj({ ...stockAdj, quantity: e.target.value })} 
+                className="input-field"
+                required 
+              />
             </div>
           </div>
+
+          {/* Reason Dropdown */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Reason</label>
-            <input type="text" value={stockAdj.reason} onChange={e => setStockAdj({ ...stockAdj, reason: e.target.value })} className="input-field" placeholder="e.g. Restock, Breakage..." required />
+            <label className="block text-sm font-semibold text-gray-700 mb-2">Reason for Adjustment *</label>
+            <select 
+              value={stockAdj.reason} 
+              onChange={e => {
+                const isOther = e.target.value === 'other';
+                setStockAdj({ ...stockAdj, reason: e.target.value });
+                setShowCustomReason(isOther);
+              }} 
+              className="input-field"
+              required
+            >
+              <option value="">-- Select a reason --</option>
+              {reasonOptions.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
           </div>
-          <div className="flex justify-end space-x-3 pt-4">
-            <button type="button" onClick={() => setStockModal(false)} className="btn-secondary">Cancel</button>
-            <button type="submit" className="btn-primary">Adjust</button>
+
+          {/* Custom Reason Input (Conditional) */}
+          {showCustomReason && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Please Specify the Reason *</label>
+              <input 
+                type="text" 
+                value={stockAdj.customReason} 
+                onChange={e => setStockAdj({ ...stockAdj, customReason: e.target.value })} 
+                placeholder="e.g. Supplier error, Data correction, etc."
+                className="input-field"
+                maxLength="100"
+              />
+              <p className="text-xs text-gray-500 mt-1">{stockAdj.customReason.length}/100 characters</p>
+            </div>
+          )}
+
+          {/* Action Buttons */}
+          <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
+            <button 
+              type="button" 
+              onClick={() => { 
+                setStockModal(false); 
+                setShowCustomReason(false);
+                setStockAdj({ type: 'add', quantity: '', reason: '', customReason: '' });
+              }} 
+              className="btn-secondary"
+            >
+              Cancel
+            </button>
+            <button type="submit" className="btn-primary">
+              ✓ Adjust Stock
+            </button>
           </div>
         </form>
       </Modal>

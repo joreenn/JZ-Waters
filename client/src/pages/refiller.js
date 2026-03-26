@@ -11,26 +11,48 @@ import { Droplets, Plus, BarChart3, Clock, CheckCircle } from 'lucide-react';
 import { formatCurrency, formatDateTime } from '../../../shared/helpers';
 import toast from 'react-hot-toast';
 
+const REFILL_PRODUCT_RULES = [
+  {
+    key: 'gallon',
+    label: 'Gallon of Water',
+    match: (name) => name.includes('gallon') && name.includes('water'),
+  },
+  {
+    key: '1l-bottle',
+    label: '1L Bottle',
+    match: (name) => (name.includes('1l') || name.includes('1 l')) && name.includes('water'),
+  },
+  {
+    key: '500ml-bottle',
+    label: '500ml Bottle',
+    match: (name) => name.includes('500ml') && name.includes('water'),
+  },
+];
+
 export default function RefillerDashboard() {
   const [refills, setRefills] = useState([]);
   const [products, setProducts] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({ page: 1, limit: 10, total: 0, totalPages: 1 });
   const [form, setForm] = useState({
-    product_id: '', quantity: 1, customer_name: '', payment_method: 'cash', amount_paid: ''
+    product_id: '', quantity: '', customer_name: '', payment_method: 'cash', amount_paid: ''
   });
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(1); }, []);
 
-  const fetchData = async () => {
+  const fetchData = async (targetPage = page) => {
     try {
       const [rRes, pRes, sRes] = await Promise.all([
-        api.get('/refills'),
+        api.get('/refills', { params: { page: targetPage, limit: 10 } }),
         api.get('/products'),
         api.get('/refills/summary').catch(() => ({ data: { summary: {} } }))
       ]);
       setRefills(rRes.data.refills || []);
+      if (rRes.data.pagination) setPagination(rRes.data.pagination);
+      setPage(targetPage);
       setProducts(Array.isArray(pRes.data) ? pRes.data : (pRes.data.products || []));
       setSummary(sRes.data.summary);
     } catch { toast.error('Failed to load data'); }
@@ -39,21 +61,49 @@ export default function RefillerDashboard() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const parsedQuantity = parseInt(form.quantity, 10);
+    if (!parsedQuantity || parsedQuantity < 1) {
+      toast.error('Please enter a valid quantity');
+      return;
+    }
+    if (!selectedProduct) {
+      toast.error('Please select a valid refill product');
+      return;
+    }
+
     try {
       await api.post('/refills', {
-        ...form,
-        product_id: parseInt(form.product_id),
-        quantity: parseInt(form.quantity),
-        amount_paid: parseFloat(form.amount_paid)
+        customer_name: form.customer_name?.trim() || 'Walk-in',
+        gallons_count: parsedQuantity,
+        price_per_gallon: Number(selectedProduct.price || 0),
+        notes: `Product: ${selectedProduct.refillLabel}; Payment: ${form.payment_method}`,
       });
       toast.success('Refill logged!');
       setModalOpen(false);
-      setForm({ product_id: '', quantity: 1, customer_name: '', payment_method: 'cash', amount_paid: '' });
-      fetchData();
+      setForm({ product_id: '', quantity: '', customer_name: '', payment_method: 'cash', amount_paid: '' });
+      fetchData(1);
     } catch (err) { toast.error(err.response?.data?.error || 'Failed'); }
   };
 
-  const selectedProduct = products.find(p => p.id == form.product_id);
+  const normalizeName = (value) => String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  const refillProducts = REFILL_PRODUCT_RULES
+    .map((rule) => {
+      const found = products.find((product) => rule.match(normalizeName(product.name)));
+      return found ? { ...found, refillLabel: rule.label } : null;
+    })
+    .filter(Boolean);
+  const selectedProduct = refillProducts.find(p => p.id == form.product_id);
+
+  const extractMeta = (notes = '') => {
+    const product = String(notes).match(/Product:\s*([^;]+)/i)?.[1]?.trim() || 'Refill';
+    const payment = String(notes).match(/Payment:\s*([^;]+)/i)?.[1]?.trim() || '-';
+    return { product, payment };
+  };
+
+  const handlePageChange = (nextPage) => {
+    if (nextPage < 1 || nextPage > (pagination.totalPages || 1)) return;
+    fetchData(nextPage);
+  };
 
   return (
     <StaffLayout role="refiller">
@@ -105,31 +155,76 @@ export default function RefillerDashboard() {
               {refills.length === 0 ? (
                 <p className="text-center text-gray-400 py-8">No refill transactions yet today</p>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-gray-500 border-b">
-                        <th className="pb-3 font-medium">Time</th>
-                        <th className="pb-3 font-medium">Customer</th>
-                        <th className="pb-3 font-medium">Product</th>
-                        <th className="pb-3 font-medium">Qty</th>
-                        <th className="pb-3 font-medium">Amount</th>
-                        <th className="pb-3 font-medium">Payment</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {refills.map(r => (
-                        <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50">
-                          <td className="py-3 text-gray-500 text-xs">{formatDateTime(r.created_at)}</td>
-                          <td className="py-3 font-medium">{r.customer_name || 'Walk-in'}</td>
-                          <td className="py-3">{r.product_name}</td>
-                          <td className="py-3">{r.quantity}</td>
-                          <td className="py-3 font-medium text-green-600">{formatCurrency(r.amount_paid)}</td>
-                          <td className="py-3 capitalize">{r.payment_method}</td>
+                <div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-gray-500 border-b">
+                          <th className="pb-3 font-medium">Time</th>
+                          <th className="pb-3 font-medium">Customer</th>
+                          <th className="pb-3 font-medium">Product</th>
+                          <th className="pb-3 font-medium">Gallons</th>
+                          <th className="pb-3 font-medium">Price/Gallon</th>
+                          <th className="pb-3 font-medium">Amount</th>
+                          <th className="pb-3 font-medium">Payment</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {refills.map(r => {
+                          const meta = extractMeta(r.notes);
+                          return (
+                            <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50">
+                              <td className="py-3 text-gray-500 text-xs">{formatDateTime(r.created_at)}</td>
+                              <td className="py-3 font-medium">{r.customer_name || 'Walk-in'}</td>
+                              <td className="py-3">{meta.product}</td>
+                              <td className="py-3">{Number(r.gallons_count || 0)}</td>
+                              <td className="py-3">{formatCurrency(r.price_per_gallon || 0)}</td>
+                              <td className="py-3 font-medium text-green-600">{formatCurrency(r.total || 0)}</td>
+                              <td className="py-3 capitalize">{meta.payment}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <p className="text-xs text-gray-500">
+                      Showing {refills.length > 0 ? ((pagination.page - 1) * pagination.limit) + 1 : 0}
+                      -{((pagination.page - 1) * pagination.limit) + refills.length} of {pagination.total}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handlePageChange(page - 1)}
+                        disabled={page <= 1}
+                        className="px-3 py-1.5 text-sm rounded border border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                      >
+                        Prev
+                      </button>
+                      {Array.from({ length: pagination.totalPages || 1 }, (_, i) => i + 1)
+                        .slice(Math.max(0, page - 3), Math.max(0, page - 3) + 5)
+                        .map((n) => (
+                          <button
+                            key={n}
+                            onClick={() => handlePageChange(n)}
+                            className={`px-3 py-1.5 text-sm rounded border ${
+                              n === page
+                                ? 'bg-primary-600 text-white border-primary-600'
+                                : 'border-gray-300 hover:bg-gray-50'
+                            }`}
+                          >
+                            {n}
+                          </button>
+                        ))}
+                      <button
+                        onClick={() => handlePageChange(page + 1)}
+                        disabled={page >= (pagination.totalPages || 1)}
+                        className="px-3 py-1.5 text-sm rounded border border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                      >
+                        Next
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -143,11 +238,17 @@ export default function RefillerDashboard() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Product</label>
             <select value={form.product_id} onChange={e => {
-              setForm({ ...form, product_id: e.target.value });
+              const chosen = refillProducts.find((p) => String(p.id) === e.target.value);
+              const qty = Number(form.quantity || 0);
+              setForm({
+                ...form,
+                product_id: e.target.value,
+                amount_paid: chosen && qty > 0 ? (Number(chosen.price || 0) * qty).toFixed(2) : '',
+              });
             }} className="input-field" required>
               <option value="">Select product...</option>
-              {products.filter(p => p.category === 'water').map(p => (
-                <option key={p.id} value={p.id}>{p.name} — {formatCurrency(p.price)}/{p.unit}</option>
+              {refillProducts.map(p => (
+                <option key={p.id} value={p.id}>{p.refillLabel} - {formatCurrency(p.price)}/{p.unit}</option>
               ))}
             </select>
           </div>
@@ -156,8 +257,15 @@ export default function RefillerDashboard() {
               <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
               <input type="number" min="1" value={form.quantity}
                 onChange={e => {
-                  const qty = parseInt(e.target.value) || 1;
-                  setForm({ ...form, quantity: qty, amount_paid: selectedProduct ? (selectedProduct.price * qty).toFixed(2) : form.amount_paid });
+                  const rawQty = e.target.value;
+                  const qty = rawQty === '' ? '' : Math.max(1, parseInt(rawQty, 10) || 1);
+                  setForm({
+                    ...form,
+                    quantity: qty,
+                    amount_paid: selectedProduct && qty !== ''
+                      ? (Number(selectedProduct.price || 0) * Number(qty)).toFixed(2)
+                      : '',
+                  });
                 }}
                 className="input-field" required />
             </div>
